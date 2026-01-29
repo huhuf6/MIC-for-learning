@@ -1,0 +1,50 @@
+# Build files
+build/
+CMakeCache.txt
+CMakeFiles/
+Makefile
+*.cmake
+*.so
+*.dylib
+*.lib
+*.dll
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test files
+/test/
+/test_output/
+
+# Benchmark files
+*.engine
+*.onnx
+
+# Python files
+__pycache__/
+*.pyc
+
+# Log files
+*.log
+
+# TensorRT files
+*.plan
+
+# CUDA files
+*.cuo
+
+# Temporary files
+.tmp/
+temp/
+
+# Environment files
+.env
+*.env
+
+# Documentation files
+*.md
+*.rst
