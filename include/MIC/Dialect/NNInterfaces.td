@@ -2,7 +2,7 @@ include "mlir/IR/OpBase.td"
 
 // NN dialect interfaces
 
-define_interface "NNLayerInterface" {
+def NNLayerInterface : OpInterface<"NNLayerInterface"> {
   let description = "Interface for NN layer operations";
   let cppNamespace = "::MIC::NN";
 
@@ -28,7 +28,7 @@ define_interface "NNLayerInterface" {
 }
 
 // Fusable operation interface
-define_interface "FusableOpInterface" {
+def FusableOpInterface : OpInterface<"FusableOpInterface"> {
   let description = "Interface for operations that can be fused";
   let cppNamespace = "::MIC::NN";
 

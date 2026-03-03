@@ -1,44 +1,45 @@
-cmake_minimum_required(VERSION 3.18)
-project(MIC LANGUAGES CXX C)
+#===----------------------------------------------------------------------===##
+# MIC项目主构建配置
+#===----------------------------------------------------------------------===##
 
-set(CMAKE_CXX_STANDARD 17)
+cmake_minimum_required(VERSION 3.16)
+project(MIC LANGUAGES CXX CUDA)
+
+# 设置C++标准
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find MLIR and LLVM
-find_package(MLIR REQUIRED CONFIG)
+# 查找LLVM
 find_package(LLVM REQUIRED CONFIG)
+list(APPEND CMAKE_MODULE_PATH ${LLVM_CMAKE_DIR})
+include(AddLLVM)
 
-# Find TensorRT
+# 查找MLIR
+find_package(MLIR REQUIRED CONFIG)
+list(APPEND CMAKE_MODULE_PATH ${MLIR_CMAKE_DIR})
+include(AddMLIR)
+
+# 包含TableGen模块
+include(TableGen)
+
+# 查找CUDA
 find_package(CUDA REQUIRED)
-find_package(TensorRT REQUIRED)
 
-# Find ONNX
+# 查找ONNX
 find_package(ONNX REQUIRED)
 
-# Add MLIR and LLVM includes
-include_directories(${MLIR_INCLUDE_DIRS})
-include_directories(${LLVM_INCLUDE_DIRS})
-include_directories(${CUDA_INCLUDE_DIRS})
-include_directories(${TensorRT_INCLUDE_DIRS})
-include_directories(${ONNX_INCLUDE_DIRS})
+# 禁用TensorRT相关功能，因为通过pip安装的TensorRT不包含开发头文件
+set(TensorRT_FOUND FALSE)
 
-# Add project includes
-include_directories(include)
+# 禁用工具和测试目录的构建
+set(LLVM_BUILD_TOOLS OFF)
+set(LLVM_BUILD_TESTS OFF)
+set(MLIR_BUILD_TOOLS OFF)
+set(MLIR_BUILD_TESTS OFF)
 
-# Add MLIR and LLVM definitions
-add_definitions(${MLIR_DEFINITIONS})
-add_definitions(${LLVM_DEFINITIONS})
-
-# Add CUDA and TensorRT definitions
-add_definitions(${CUDA_DEFINITIONS})
-
-# Add subdirectories
-add_subdirectory(lib)
+# 添加子目录
+add_subdirectory(lib/Dialect/NN)
+add_subdirectory(lib/Passes)
+add_subdirectory(lib/CUDA)
+add_subdirectory(lib/TensorRT)
 add_subdirectory(tools)
-add_subdirectory(test)
-
-# Add documentation target
-add_custom_target(doc
-    COMMAND ${CMAKE_COMMAND} -E echo "Building documentation..."
-    COMMENT "Documentation target"
-)
