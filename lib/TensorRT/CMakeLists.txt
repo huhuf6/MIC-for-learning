@@ -2,36 +2,34 @@
 # TensorRT模块构建配置
 #===----------------------------------------------------------------------===##
 
-# 只有当找到TensorRT时才构建TensorRT模块
 if(TensorRT_FOUND)
-  # 直接指定TensorRT库文件的路径
-  set(TENSORRT_LIBRARY "${TensorRT_LIBRARY_DIRS}/libnvinfer.so.8")
-  set(TENSORRT_PLUGIN_LIBRARY "${TensorRT_LIBRARY_DIRS}/libnvinfer_plugin.so.8")
+  # 查找TensorRT库文件
+  find_library(TENSORRT_LIBRARY NAMES nvinfer PATHS ${TensorRT_LIBRARY_DIRS} NO_DEFAULT_PATH)
+  find_library(TENSORRT_PLUGIN_LIBRARY NAMES nvinfer_plugin PATHS ${TensorRT_LIBRARY_DIRS} NO_DEFAULT_PATH)
+  find_library(TENSORRT_PARSERS_LIBRARY NAMES nvparsers PATHS ${TensorRT_LIBRARY_DIRS} NO_DEFAULT_PATH)
+  find_library(TENSORRT_ONNX_PARSER_LIBRARY NAMES nvonnxparser PATHS ${TensorRT_LIBRARY_DIRS} NO_DEFAULT_PATH)
   
-  # 查找CUDA库文件
-  find_library(CUDA_CUDART_LIBRARY cudart)
+  message(STATUS "Found TensorRT library: ${TENSORRT_LIBRARY}")
+  message(STATUS "Found TensorRT plugin library: ${TENSORRT_PLUGIN_LIBRARY}")
   
-  # 查找系统库
-  find_library(RT_LIBRARY rt)
-  find_library(DL_LIBRARY dl)
-  
-  add_mlir_library(MICTensorRT
+  add_library(MICTensorRT STATIC
       TensorRTBuilder.cpp
       NetworkConverter.cpp
-
-      LINK_LIBS PUBLIC
+      )
+  
+  target_link_libraries(MICTensorRT PUBLIC
       MLIRIR
       MLIRPass
       MICNNDialect
-      ${CUDA_CUDART_LIBRARY}
+      ${CUDA_LIBRARIES}
       ${TENSORRT_LIBRARY}
       ${TENSORRT_PLUGIN_LIBRARY}
-      ${RT_LIBRARY}
-      ${DL_LIBRARY}
+      ${TENSORRT_PARSERS_LIBRARY}
+      ${TENSORRT_ONNX_PARSER_LIBRARY}
+      dl
       )
   
-  # 添加包含目录
-  target_include_directories(MICTensorRT PRIVATE
+  target_include_directories(MICTensorRT PUBLIC
     ${PROJECT_SOURCE_DIR}/include
     ${MLIR_INCLUDE_DIRS}
     ${LLVM_INCLUDE_DIRS}

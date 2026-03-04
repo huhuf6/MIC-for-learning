@@ -2,7 +2,6 @@
 # mlir2trt工具构建配置
 #===----------------------------------------------------------------------===##
 
-# 只有当找到TensorRT时才构建mlir2trt工具
 if(TensorRT_FOUND)
   add_llvm_executable(mlir2trt mlir2trt.cpp)
 
@@ -17,20 +16,15 @@ if(TensorRT_FOUND)
     MICNNDialect
     MICPasses
     MICTensorRT
-    MICCUDA
-    ${CUDA_LIBRARIES}
     ${TensorRT_LIBRARIES}
-    ${ONNX_LIBRARIES}
+    dl
     )
 
-  # 添加包含目录
   target_include_directories(mlir2trt PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${MLIR_INCLUDE_DIRS}
     ${LLVM_INCLUDE_DIRS}
-    ${CUDA_INCLUDE_DIRS}
     ${TensorRT_INCLUDE_DIRS}
-    ${ONNX_INCLUDE_DIRS}
     ${CMAKE_CURRENT_BINARY_DIR}
   )
 

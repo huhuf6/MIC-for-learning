@@ -28,8 +28,15 @@ find_package(CUDA REQUIRED)
 # 查找ONNX
 find_package(ONNX REQUIRED)
 
-# 禁用TensorRT相关功能，因为通过pip安装的TensorRT不包含开发头文件
-set(TensorRT_FOUND FALSE)
+# TensorRT配置 - 手动设置
+set(TensorRT_ROOT "/usr/local/TensorRT-8.5.2.2")
+set(TensorRT_INCLUDE_DIRS "${TensorRT_ROOT}/include")
+set(TensorRT_LIBRARY_DIRS "${TensorRT_ROOT}/lib")
+set(TensorRT_FOUND TRUE)
+
+message(STATUS "TensorRT Root: ${TensorRT_ROOT}")
+message(STATUS "TensorRT Include: ${TensorRT_INCLUDE_DIRS}")
+message(STATUS "TensorRT Library: ${TensorRT_LIBRARY_DIRS}")
 
 # 禁用工具和测试目录的构建
 set(LLVM_BUILD_TOOLS OFF)
