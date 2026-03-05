@@ -1,10 +1,14 @@
 #include "MIC/TensorRT/NetworkConverter.h"
 #include "MIC/Dialect/NNOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "NvInfer.h"
 
 using namespace mlir;
 using namespace MIC::NN;
-using namespace MIC::TensorRT;
+
+namespace mlir {
+namespace MIC {
+namespace TensorRT {
 
 class NetworkConverter::Impl {
 private:
@@ -37,8 +41,8 @@ public:
   }
 
   LogicalResult convertLinearOp(LinearOp op) {
-    auto input = getOrCreateTensor(op.getInput());
-    auto weight = getOrCreateTensor(op.getWeight());
+    auto input = getOrCreateTensor(op.input());
+    auto weight = getOrCreateTensor(op.weight());
     
     if (!input || !weight) {
       return failure();
@@ -50,20 +54,20 @@ public:
       return failure();
     }
 
-    if (op.getBias()) {
-      auto bias = getOrCreateTensor(op.getBias());
+    if (op.bias()) {
+      auto bias = getOrCreateTensor(op.bias());
       if (bias) {
         fcLayer->setBiasWeights(*bias);
       }
     }
 
-    valueMap[op.getOutput()] = fcLayer->getOutput(0);
+    valueMap[op.output()] = fcLayer->getOutput(0);
     return success();
   }
 
   LogicalResult convertConv2DOp(Conv2DOp op) {
-    auto input = getOrCreateTensor(op.getInput());
-    auto weight = getOrCreateTensor(op.getWeight());
+    auto input = getOrCreateTensor(op.input());
+    auto weight = getOrCreateTensor(op.weight());
     
     if (!input || !weight) {
       return failure();
@@ -73,7 +77,7 @@ public:
     nvinfer1::Dims kernelSize = weight->getDimensions();
     nvinfer1::Dims stride;
     stride.nbDims = 2;
-    auto strides = op.getStrides();
+    auto strides = op.strides();
     stride.d[0] = strides[0].cast<IntegerAttr>().getInt();
     stride.d[1] = strides[1].cast<IntegerAttr>().getInt();
 
@@ -84,19 +88,19 @@ public:
 
     convLayer->setStride(stride);
 
-    if (op.getBias()) {
-      auto bias = getOrCreateTensor(op.getBias());
+    if (op.bias()) {
+      auto bias = getOrCreateTensor(op.bias());
       if (bias) {
         convLayer->setBiasWeights(*bias);
       }
     }
 
-    valueMap[op.getOutput()] = convLayer->getOutput(0);
+    valueMap[op.output()] = convLayer->getOutput(0);
     return success();
   }
 
   LogicalResult convertGELUOp(GELUOp op) {
-    auto input = getOrCreateTensor(op.getInput());
+    auto input = getOrCreateTensor(op.input());
     if (!input) {
       return failure();
     }
@@ -107,12 +111,12 @@ public:
       return failure();
     }
 
-    valueMap[op.getOutput()] = activationLayer->getOutput(0);
+    valueMap[op.output()] = activationLayer->getOutput(0);
     return success();
   }
 
   LogicalResult convertLayerNormOp(LayerNormOp op) {
-    auto input = getOrCreateTensor(op.getInput());
+    auto input = getOrCreateTensor(op.input());
     if (!input) {
       return failure();
     }
@@ -120,7 +124,7 @@ public:
     // For now, we'll need to implement this as a plugin
     // TensorRT doesn't have built-in layer norm
     // TODO: Implement LayerNorm plugin
-    valueMap[op.getOutput()] = input;
+    valueMap[op.output()] = input;
     return success();
   }
 
@@ -167,3 +171,7 @@ LogicalResult NetworkConverter::convertOperation(Operation *op) {
 const DenseMap<Value, nvinfer1::ITensor *> &NetworkConverter::getValueMap() const {
   return impl->getValueMap();
 }
+
+} // namespace TensorRT
+} // namespace MIC
+} // namespace mlir

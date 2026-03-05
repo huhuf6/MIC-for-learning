@@ -97,14 +97,29 @@ LogicalResult Conv2DOp::inferReturnTypes(
   }
   
   // 获取卷积参数
-  auto strides = getStrides();     // 步长
-  auto padding = getPadding();     // 填充
-  auto dilation = getDilation();   // 膨胀率
-  auto groups = getGroups();       // 分组数
+  ::mlir::ArrayAttr stridesAttr = attributes.get("strides").dyn_cast_or_null<::mlir::ArrayAttr>();
+  ::mlir::ArrayAttr paddingAttr = attributes.get("padding").dyn_cast_or_null<::mlir::ArrayAttr>();
+  ::mlir::ArrayAttr dilationAttr = attributes.get("dilation").dyn_cast_or_null<::mlir::ArrayAttr>();
+  
+  if (!stridesAttr || !paddingAttr || !dilationAttr) {
+    return failure();
+  }
+  
+  // 获取数组值
+  auto strides = stridesAttr.getValue();
+  auto padding = paddingAttr.getValue();
+  auto dilation = dilationAttr.getValue();
   
   // 计算输出形状
-  int64_t H_out = (inputShape[2] + 2 * padding[0] - dilation[0] * (weightShape[2] - 1) - 1) / strides[0] + 1;
-  int64_t W_out = (inputShape[3] + 2 * padding[1] - dilation[1] * (weightShape[3] - 1) - 1) / strides[1] + 1;
+  int64_t strideH = strides[0].cast<IntegerAttr>().getInt();
+  int64_t strideW = strides[1].cast<IntegerAttr>().getInt();
+  int64_t padH = padding[0].cast<IntegerAttr>().getInt();
+  int64_t padW = padding[1].cast<IntegerAttr>().getInt();
+  int64_t dilH = dilation[0].cast<IntegerAttr>().getInt();
+  int64_t dilW = dilation[1].cast<IntegerAttr>().getInt();
+  
+  int64_t H_out = (inputShape[2] + 2 * padH - dilH * (weightShape[2] - 1) - 1) / strideH + 1;
+  int64_t W_out = (inputShape[3] + 2 * padW - dilW * (weightShape[3] - 1) - 1) / strideW + 1;
   
   // 构建输出形状
   SmallVector<int64_t, 4> outputShape;
@@ -186,4 +201,4 @@ LogicalResult AttentionOp::inferReturnTypes(
 // TableGen生成的实现
 // 说明：包含TableGen生成的操作实现代码
 //===----------------------------------------------------------------------===//
-#include "MIC/Dialect/NNOps.cpp.inc"
+#include "NN.cpp.inc"

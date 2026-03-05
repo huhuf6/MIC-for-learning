@@ -5,6 +5,8 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/FoldUtils.h"
+#include "mlir/Support/TypeID.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "MIC/Dialect/NNOps.h"
 
 // 使用mlir命名空间
@@ -64,16 +66,8 @@ public:
       }
 
       // 尝试折叠操作
-      SmallVector<Value, 4> foldedValues;
-      if (succeeded(folder.tryToFold(op, foldedValues))) {
-        // 用折叠后的值替换原操作
-        if (foldedValues.size() == op->getNumResults()) {
-          for (unsigned i = 0; i < foldedValues.size(); ++i) {
-            if (foldedValues[i] != op->getResult(i)) {
-              op->getResult(i).replaceAllUsesWith(foldedValues[i]);
-            }
-          }
-        }
+      if (succeeded(folder.tryToFold(op))) {
+        // 折叠成功，操作已被替换
       }
     });
   }

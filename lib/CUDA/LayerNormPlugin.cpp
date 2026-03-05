@@ -115,7 +115,7 @@ size_t LayerNormPlugin::getWorkspaceSize(int maxBatchSize) const noexcept {
   return 0;
 }
 
-int LayerNormPlugin::enqueue(int batchSize, const void *const *inputs, void **outputs, void *workspace, cudaStream_t stream) noexcept {
+int LayerNormPlugin::enqueue(int batchSize, const void *const *inputs, void *const *outputs, void *workspace, cudaStream_t stream) noexcept {
   auto inputDims = getOutputDimensions(0, nullptr, 0);
   int hiddenSize = inputDims.d[1];
   

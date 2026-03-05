@@ -4,6 +4,9 @@
 
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "mlir/Support/TypeID.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "MIC/Dialect/NNOps.h"
 
 // 使用mlir命名空间
@@ -83,27 +86,27 @@ private:
     //===----------------------------------------------------------------------===//
     LogicalResult matchAndRewrite(GELUOp geluOp, PatternRewriter &rewriter) const override {
       // 检查GELU的输入是否是LinearOp的输出
-      auto linearOp = geluOp.getInput().getDefiningOp<LinearOp>();
+      auto linearOp = geluOp.input().getDefiningOp<LinearOp>();
       if (!linearOp) {
         return failure();
       }
 
       // 创建融合的linear+gelu操作
       SmallVector<Value, 3> operands;
-      operands.push_back(linearOp.getInput());
-      operands.push_back(linearOp.getWeight());
-      if (linearOp.getBias()) {
-        operands.push_back(linearOp.getBias());
+      operands.push_back(linearOp.input());
+      operands.push_back(linearOp.weight());
+      if (linearOp.bias()) {
+        operands.push_back(linearOp.bias());
       }
 
       // 创建新操作（目前使用现有操作）
       // 注意：在实际实现中，我们会定义一个融合操作
       auto linearResult = rewriter.create<LinearOp>(
-          linearOp.getLoc(), linearOp.getInput(), linearOp.getWeight(), linearOp.getBias());
-      auto fusedResult = rewriter.create<GELUOp>(geluOp.getLoc(), linearResult.getOutput());
+          linearOp.getLoc(), linearOp.input(), linearOp.weight(), linearOp.bias());
+      auto fusedResult = rewriter.create<GELUOp>(geluOp.getLoc(), linearResult.output());
 
       // 用融合后的结果替换原GELU操作
-      rewriter.replaceOp(geluOp, fusedResult.getOutput());
+      rewriter.replaceOp(geluOp, fusedResult.output());
       return success();
     }
   };
@@ -126,19 +129,19 @@ private:
     //===----------------------------------------------------------------------===//
     LogicalResult matchAndRewrite(LayerNormOp lnOp, PatternRewriter &rewriter) const override {
       // 检查LayerNorm的输入是否是LinearOp的输出
-      auto linearOp = lnOp.getInput().getDefiningOp<LinearOp>();
+      auto linearOp = lnOp.input().getDefiningOp<LinearOp>();
       if (!linearOp) {
         return failure();
       }
 
       // 创建融合的linear+layernorm操作
       auto linearResult = rewriter.create<LinearOp>(
-          linearOp.getLoc(), linearOp.getInput(), linearOp.getWeight(), linearOp.getBias());
+          linearOp.getLoc(), linearOp.input(), linearOp.weight(), linearOp.bias());
       auto fusedResult = rewriter.create<LayerNormOp>(
-          lnOp.getLoc(), linearResult.getOutput(), lnOp.getScale(), lnOp.getBias(), lnOp.getEpsilon());
+          lnOp.getLoc(), linearResult.output(), lnOp.scale(), lnOp.bias(), lnOp.epsilonAttr());
 
       // 用融合后的结果替换原LayerNorm操作
-      rewriter.replaceOp(lnOp, fusedResult.getOutput());
+      rewriter.replaceOp(lnOp, fusedResult.output());
       return success();
     }
   };

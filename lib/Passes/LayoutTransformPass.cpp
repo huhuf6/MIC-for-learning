@@ -4,6 +4,9 @@
 
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "mlir/Support/TypeID.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "MIC/Dialect/NNOps.h"
 
 // 使用mlir命名空间
@@ -81,7 +84,7 @@ private:
     //===----------------------------------------------------------------------===//
     LogicalResult matchAndRewrite(Conv2DOp convOp, PatternRewriter &rewriter) const override {
       // 检查输入是否是ranked tensor类型
-      auto inputType = convOp.getInput().getType().dyn_cast<RankedTensorType>();
+      auto inputType = convOp.input().getType().dyn_cast<RankedTensorType>();
       if (!inputType) {
         return failure();
       }
