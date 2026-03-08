@@ -6,8 +6,8 @@
 set(LLVM_TARGET_DEFINITIONS ../../include/MIC/Dialect/NNOps.td)
 
 # 运行TableGen生成操作定义
-mlir_tablegen(NNOps.h.inc -gen-op-decls)
-mlir_tablegen(NNOps.cpp.inc -gen-op-defs)
+mlir_tablegen(NN.h.inc -gen-op-decls)
+mlir_tablegen(NN.cpp.inc -gen-op-defs)
 mlir_tablegen(NNDialect.cpp.inc -gen-dialect-defs)
 
 # 定义TableGen文件
@@ -32,7 +32,7 @@ add_mlir_library(MICNNDialect
 )
 
 # 添加包含目录
-target_include_directories(MICNNDialect PRIVATE
+target_include_directories(MICNNDialect PUBLIC
   ${PROJECT_SOURCE_DIR}/include
   ${MLIR_INCLUDE_DIRS}
   ${LLVM_INCLUDE_DIRS}

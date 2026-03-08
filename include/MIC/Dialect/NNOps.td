@@ -16,6 +16,18 @@ def NN_Dialect : Dialect {
 class NNOp<string mnemonic, list<Trait> traits = []> :
     Op<NN_Dialect, mnemonic, traits>;
 
+class NNUnaryOp<string mnemonic> :
+    NNOp<mnemonic, [NoSideEffect, SameOperandsAndResultType]> {
+  let arguments = (ins AnyTensor:$input);
+  let results = (outs AnyTensor:$output);
+}
+
+class NNBinaryOp<string mnemonic> :
+    NNOp<mnemonic, [NoSideEffect, SameOperandsAndResultType]> {
+  let arguments = (ins AnyTensor:$lhs, AnyTensor:$rhs);
+  let results = (outs AnyTensor:$output);
+}
+
 // Linear layer operation
 def LinearOp : NNOp<"linear", [NoSideEffect, SameOperandsAndResultElementType]> {
     let summary = "Linear layer operation";
@@ -67,13 +79,11 @@ def AttentionOp : NNOp<"attention", [NoSideEffect, SameOperandsAndResultElementT
 }
 
 // GELU activation
-def GELUOp : NNOp<"gelu", [NoSideEffect, SameOperandsAndResultElementType]> {
+def GELUOp : NNUnaryOp<"gelu"> {
     let summary = "GELU activation function";
     let description = [{
       Applies the Gaussian Error Linear Unit (GELU) activation function.
     }];
-    let arguments = (ins AnyTensor:$input);
-    let results = (outs AnyTensor:$output);
 }
 
 // LayerNorm operation
@@ -90,4 +100,50 @@ def LayerNormOp : NNOp<"layer_norm", [NoSideEffect, SameOperandsAndResultElement
         F64Attr:$epsilon
     );
     let results = (outs AnyTensor:$output);
+}
+
+def ReluOp : NNUnaryOp<"relu"> {
+  let summary = "ReLU activation";
+  let description = [{
+    Applies rectified linear activation: max(0, x).
+  }];
+}
+
+def SoftmaxOp : NNUnaryOp<"softmax"> {
+  let summary = "Softmax operation";
+  let description = [{
+    Applies softmax normalization on the given axis.
+  }];
+  let arguments = (ins AnyTensor:$input, I64Attr:$axis);
+  let results = (outs AnyTensor:$output);
+}
+
+def AddOp : NNBinaryOp<"add"> {
+  let summary = "Elementwise add";
+}
+
+def MulOp : NNBinaryOp<"mul"> {
+  let summary = "Elementwise multiply";
+}
+
+def MatMulOp : NNBinaryOp<"matmul"> {
+  let summary = "Matrix multiplication";
+}
+
+def ReshapeOp : NNOp<"reshape", [NoSideEffect]> {
+  let summary = "Tensor reshape";
+  let description = [{
+    Reshapes the input tensor to the target shape.
+  }];
+  let arguments = (ins AnyTensor:$input, I64ArrayAttr:$shape);
+  let results = (outs AnyTensor:$output);
+}
+
+def TransposeOp : NNOp<"transpose", [NoSideEffect]> {
+  let summary = "Tensor transpose";
+  let description = [{
+    Transposes the input tensor according to the permutation.
+  }];
+  let arguments = (ins AnyTensor:$input, I64ArrayAttr:$perm);
+  let results = (outs AnyTensor:$output);
 }

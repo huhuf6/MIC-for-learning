@@ -21,6 +21,6 @@ class NNDialect;
 } // namespace MIC
 
 #define GET_OP_CLASSES
-#include "MIC/Dialect/NNOps.h.inc"
+#include "NN.h.inc"
 
 #endif // MIC_DIALECT_NN_OPS_H

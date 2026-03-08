@@ -22,7 +22,9 @@ private:
 public:
   Impl() {
     builder = nvinfer1::createInferBuilder(gLogger);
-    network = builder->createNetworkV2(1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH));
+    // TensorRT 10+ 已默认 explicit batch，旧 flag 在新版本中已废弃。
+    // 使用 0 避免跨版本行为差异导致的不稳定问题。
+    network = builder->createNetworkV2(0U);
     config = builder->createBuilderConfig();
   }
 

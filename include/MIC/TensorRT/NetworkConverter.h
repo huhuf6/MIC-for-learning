@@ -10,6 +10,10 @@ namespace mlir {
 namespace MIC {
 namespace TensorRT {
 
+/// 将 MLIR 操作转换为 TensorRT Network Layer。
+///
+/// 当前后端边界约定输入为运行时风格调用：
+/// `func.call @mic_trt_matmul/...`，再映射到 TensorRT API。
 class NetworkConverter {
 private:
   class Impl;
@@ -19,8 +23,10 @@ public:
   NetworkConverter(TensorRTBuilder &builder);
   ~NetworkConverter();
 
+  /// 转换单个 MLIR 操作；遇到不支持或非法操作返回 failure。
   LogicalResult convertOperation(Operation *op);
 
+  /// 正向映射：MLIR SSA Value -> TensorRT ITensor*。
   const DenseMap<Value, nvinfer1::ITensor *> &getValueMap() const;
 };
 

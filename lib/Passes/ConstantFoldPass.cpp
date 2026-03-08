@@ -4,7 +4,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Pass/Pass.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "MIC/Dialect/NNOps.h"
 #include "MIC/Dialect/NNDialect.h"
 
@@ -13,7 +13,7 @@ using namespace MIC::NN;
 
 namespace {
 
-class ConstantFoldPass : public PassWrapper<ConstantFoldPass, OperationPass<FuncOp>> {
+class ConstantFoldPass : public PassWrapper<ConstantFoldPass, OperationPass<func::FuncOp>> {
 public:
   StringRef getArgument() const final { return "constant-fold"; }
   StringRef getDescription() const final { return "Fold constant operations"; }
@@ -21,7 +21,7 @@ public:
 };
 
 void ConstantFoldPass::runOnOperation() {
-  FuncOp func = getOperation();
+  func::FuncOp func = getOperation();
   
   // 遍历函数中的所有操作
   func.walk([&](Operation *op) {

@@ -4,7 +4,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Pass/Pass.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "MIC/Dialect/NNOps.h"
 #include "MIC/Dialect/NNDialect.h"
 
@@ -13,7 +13,7 @@ using namespace MIC::NN;
 
 namespace {
 
-class LayoutTransformPass : public PassWrapper<LayoutTransformPass, OperationPass<FuncOp>> {
+class LayoutTransformPass : public PassWrapper<LayoutTransformPass, OperationPass<func::FuncOp>> {
 public:
   StringRef getArgument() const final { return "layout-transform"; }
   StringRef getDescription() const final { return "Transform tensor layouts for better memory access patterns"; }
@@ -21,7 +21,7 @@ public:
 };
 
 void LayoutTransformPass::runOnOperation() {
-  FuncOp func = getOperation();
+  func::FuncOp func = getOperation();
   
   // 遍历函数中的所有操作
   func.walk([&](Operation *op) {

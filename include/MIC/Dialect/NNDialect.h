@@ -23,4 +23,6 @@ public:
 } // namespace NN
 } // namespace MIC
 
+MLIR_DECLARE_EXPLICIT_TYPE_ID(::MIC::NN::NNDialect)
+
 #endif // MIC_DIALECT_NN_DIALECT_H

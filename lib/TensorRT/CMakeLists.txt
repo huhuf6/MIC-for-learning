@@ -19,6 +19,7 @@ if(TensorRT_FOUND)
   
   target_link_libraries(MICTensorRT PUBLIC
       MLIRIR
+      MLIRFuncDialect
       MLIRPass
       MICNNDialect
       ${CUDA_LIBRARIES}

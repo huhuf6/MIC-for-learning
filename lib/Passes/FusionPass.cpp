@@ -5,7 +5,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Pass/Pass.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "MIC/Dialect/NNOps.h"
 #include "MIC/Dialect/NNDialect.h"
 
@@ -14,7 +14,7 @@ using namespace MIC::NN;
 
 namespace {
 
-class FusionPass : public PassWrapper<FusionPass, OperationPass<FuncOp>> {
+class FusionPass : public PassWrapper<FusionPass, OperationPass<func::FuncOp>> {
 public:
   StringRef getArgument() const final { return "fusion"; }
   StringRef getDescription() const final { return "Fuse operations to reduce memory access and kernel launches"; }
@@ -22,7 +22,7 @@ public:
 };
 
 void FusionPass::runOnOperation() {
-  FuncOp func = getOperation();
+  func::FuncOp func = getOperation();
   
   // 遍历函数中的所有GELU操作
   func.walk([&](GELUOp geluOp) {

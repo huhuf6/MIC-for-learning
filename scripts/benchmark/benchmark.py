@@ -3,6 +3,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 import tensorrt as trt
+import sys
+
+# Compatibility for legacy pycuda code paths on newer NumPy without triggering
+# NumPy's deprecated attribute access warning.
+if "bool" not in np.__dict__:
+    np.bool = bool
+
 import pycuda.driver as cuda
 import pycuda.autoinit
 
@@ -65,8 +72,8 @@ class BenchmarkRunner:
         results = []
         for batch_size in self.batch_sizes:
             # Allocate memory
-            input_size = batch_size * np.prod(self.input_shape) * np.dtype(np.float32).itemsize
-            output_size = batch_size * 2048 * np.dtype(np.float32).itemsize
+            input_size = int(batch_size * np.prod(self.input_shape) * np.dtype(np.float32).itemsize)
+            output_size = int(batch_size * 2048 * np.dtype(np.float32).itemsize)
             
             d_input = cuda.mem_alloc(input_size)
             d_output = cuda.mem_alloc(output_size)
@@ -77,14 +84,28 @@ class BenchmarkRunner:
             
             # Warmup
             for _ in range(self.warmup_iterations):
+                if hasattr(context, "set_input_shape"):
+                    context.set_input_shape("input", (batch_size, *self.input_shape))
                 cuda.memcpy_htod(d_input, input_data)
-                context.execute_async_v2(bindings, cuda.Stream().handle)
+                if hasattr(context, "execute_async_v2"):
+                    context.execute_async_v2(bindings, cuda.Stream().handle)
+                elif hasattr(context, "execute_v2"):
+                    context.execute_v2(bindings)
+                else:
+                    context.execute_async_v3(cuda.Stream().handle)
             
             # Benchmark
             start_time = time.time()
             for _ in range(self.benchmark_iterations):
+                if hasattr(context, "set_input_shape"):
+                    context.set_input_shape("input", (batch_size, *self.input_shape))
                 cuda.memcpy_htod(d_input, input_data)
-                context.execute_async_v2(bindings, cuda.Stream().handle)
+                if hasattr(context, "execute_async_v2"):
+                    context.execute_async_v2(bindings, cuda.Stream().handle)
+                elif hasattr(context, "execute_v2"):
+                    context.execute_v2(bindings)
+                else:
+                    context.execute_async_v3(cuda.Stream().handle)
             end_time = time.time()
             
             latency = (end_time - start_time) / self.benchmark_iterations * 1000  # ms
@@ -122,5 +143,8 @@ class BenchmarkRunner:
         }
 
 if __name__ == "__main__":
+    engine = "model.engine"
+    if len(sys.argv) > 1:
+        engine = sys.argv[1]
     runner = BenchmarkRunner()
-    runner.run_all_benchmarks("model.engine")
+    runner.run_all_benchmarks(engine)

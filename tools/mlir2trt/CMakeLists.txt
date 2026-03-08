@@ -12,7 +12,7 @@ if(TensorRT_FOUND)
     MLIRSupport
     MLIRParser
     MLIRTransforms
-    MLIRLLVMIR
+    MLIRLLVMIRTransforms
     MICNNDialect
     MICPasses
     MICTensorRT

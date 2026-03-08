@@ -15,4 +15,4 @@ using namespace MIC::NN;
 // TableGen生成的实现
 // 说明：包含TableGen生成的操作实现代码
 //===----------------------------------------------------------------------===//
-#include "MIC/Dialect/NNOps.cpp.inc"
+#include "NN.cpp.inc"

@@ -18,7 +18,7 @@ namespace NN {
 
 void NNDialect::initialize() {
   addOperations<
-    #include "MIC/Dialect/NNOps.cpp.inc"
+    #include "NN.cpp.inc"
   >();
 }
 
@@ -29,4 +29,4 @@ void NNDialect::initialize() {
 // 方言注册
 // 说明：包含TableGen生成的方言注册代码
 //===----------------------------------------------------------------------===//
-#include "MIC/Dialect/NNDialect.cpp.inc"
+#include "NNDialect.cpp.inc"

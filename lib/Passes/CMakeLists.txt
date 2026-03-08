@@ -7,6 +7,8 @@ set(SOURCES
   ConstantFoldPass.cpp
   FusionPass.cpp
   LayoutTransformPass.cpp
+  NNToRuntimeLoweringPass.cpp
+  PipelineLoweringPasses.cpp
 )
 
 # 定义Passes模块的头文件
@@ -17,9 +19,15 @@ add_mlir_library(MICPasses
   ${SOURCES}
   ${HEADERS}
   LINK_LIBS PUBLIC
+  MLIRArithmeticDialect
+  MLIRLinalgDialect
+  MLIRLinalgTransforms
+  MLIRTensorDialect
   MLIRIR
   MLIRSupport
   MLIRPass
+  MLIRTransforms
+  MLIRFuncDialect
   MICNNDialect
 )
 

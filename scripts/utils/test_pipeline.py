@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import os
 import subprocess
+import sys
 
 class TestModel(nn.Module):
     def __init__(self):
@@ -28,16 +29,24 @@ def export_onnx_model():
     
     # Export to ONNX
     onnx_path = "test_model.onnx"
+    dynamic_shapes = None
+    export_kwargs = {}
+    if hasattr(torch, "export") and hasattr(torch.export, "Dim"):
+        dynamic_shapes = {"x": {0: torch.export.Dim("batch")}}
+        export_kwargs["dynamic_shapes"] = dynamic_shapes
+    else:
+        export_kwargs["dynamic_axes"] = {'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}}
+
     torch.onnx.export(
         model,
         dummy_input,
         onnx_path,
         export_params=True,
-        opset_version=11,
+        opset_version=18,
         do_constant_folding=True,
         input_names=['input'],
         output_names=['output'],
-        dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}}
+        **export_kwargs
     )
     
     print(f"ONNX model exported to: {onnx_path}")
@@ -78,7 +87,7 @@ def run_benchmark(engine_path):
     print(f"Running benchmark on: {engine_path}")
     
     # Run benchmark script
-    cmd = f"python {os.path.dirname(os.path.abspath(__file__))}/../benchmark/benchmark.py"
+    cmd = f"{sys.executable} {os.path.dirname(os.path.abspath(__file__))}/../benchmark/benchmark.py {engine_path}"
     print(f"Executing: {cmd}")
     
     try:
