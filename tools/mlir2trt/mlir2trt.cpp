@@ -10,7 +10,9 @@
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/IR/MLIRContext.h"
@@ -299,8 +301,12 @@ bool importMlirToNetwork(const std::string &inputPath,
   mlir::DialectRegistry registry;
   registry.insert<mlir::func::FuncDialect, mlir::linalg::LinalgDialect,
                   mlir::tensor::TensorDialect, mlir::arith::ArithmeticDialect,
+                  mlir::scf::SCFDialect, mlir::vector::VectorDialect,
                   MIC::NN::NNDialect>();
   mlir::MLIRContext context(registry);
+  // 允许在 MLIR 输入中携带未注册方言（例如 onnx.*），
+  // 由 LowerONNXToNN pass 在 pipeline 中进行重写。
+  context.allowUnregisteredDialects();
   context.loadAllAvailableDialects();
   mlir::ParserConfig parserConfig(&context);
   mlir::OwningOpRef<mlir::ModuleOp> module =

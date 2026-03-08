@@ -17,6 +17,9 @@ namespace MIC {
 namespace NN {
 
 void NNDialect::initialize() {
+  // 允许 nn 方言承载尚未在 TableGen 中声明的过渡 op 名称，
+  // 以支持 ONNX->NN 的增量映射与教学场景下的快速迭代。
+  allowUnknownOperations();
   addOperations<
     #include "NN.cpp.inc"
   >();
