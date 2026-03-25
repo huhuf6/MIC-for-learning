@@ -3,7 +3,28 @@ import torch_mlir
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 model_dir = "/path/to/your/model"  # 含 config.json + model.safetensors/.bin
-
+模型结构超参数
+层数（num_hidden_layers）
+隐藏维度（hidden_size）
+注意力头数（num_attention_heads）
+FFN 中间维度（intermediate_size）
+最大位置长度（max_position_embeddings）
+架构类型与类名
+model_type
+architectures（如 Qwen2ForCausalLM / LlamaForCausalLM）
+数值与算子配置
+torch_dtype（float16/bfloat16 等）
+rms_norm_eps / layer_norm_eps
+rope_theta、位置编码参数
+tie_word_embeddings 等
+词表相关（部分在 tokenizer 配置）
+vocab_size
+bos/eos/pad_token_id
+任务与生成默认参数（可选）
+是否是 causal LM、encoder-decoder
+一些 generation 默认值（有时在 generation_config.json）
+简化说：
+config 决定“网络长什么样”，权重文件决定“参数具体是多少”。
 # 1) 加载 tokenizer + 模型权重
 tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(

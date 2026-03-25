@@ -230,3 +230,73 @@ dispatch 创建后、codegen前
 太后（已经生成目标代码后）：改参数成本高，反馈闭环慢
 一句话：
 把 autotuning 放在“后端相关但还没最终降级”的那层，收益最高、成本最低。
+
+进入 codegen 前
+外层多是 flow / hal 结构（已经有 dispatch/executable 边界）
+executable variant 里常是 linalg/tensor/scf/arith 这类
+codegen 中段
+做 tiling/vectorization/bufferization
+IR 会出现更多 vector, memref, scf 等低层结构
+codegen 末段（按后端）
+CPU 路：趋向 llvm dialect
+GPU/SPIR-V 路：趋向 gpu/spirv 或 LLVM GPU 相关 IR
+VMVX 路：趋向 VMVX 对应低层表示
+
+# codegen常见优化策略（按优先级）
+
+Tiling 策略
+目标：提高缓存命中、并行粒度匹配硬件
+调参：tile_m/n/k、多级 tiling（block/warp/thread）
+Workgroup/线程映射
+目标：充分占用计算单元并减少调度空洞
+调参：workgroup shape、线程分工、wave/warp 利用率
+Vectorization
+目标：吃满 SIMD/向量单元
+调参：vector width、transfer shape、unroll 因子
+Bufferization 与内存层级
+目标：减少中间分配和带宽压力
+手段：promote 到 shared/local、in-place/alias、copy 消除
+Pipeline/Prefetch
+目标：隐藏访存延迟
+调参：software pipeline depth、prefetch 距离、双缓冲
+Layout 优化
+目标：避免 bank conflict、对齐硬件访存
+手段：转置传播、packed layout、stride 调整
+融合/去融合平衡
+目标：减少 launch 和中间写回，同时避免寄存器爆炸
+做法：图级先融合，codegen 层按资源再细调
+
+# passes
+注册阶段：把 pass “挂到系统里可用”
+执行阶段：编译时按 pipeline 顺序真正运行
+下面按“执行阶段”来讲它们各自作用：
+
+input_plugin pass（Torch/StableHLO/TOSA 插件）
+阶段：Input phase 最前面
+作用：把前端方言（onnx/torch/stablehlo/tosa）降到 IREE 主线可接受 IR（linalg/tensor + IREE 输入层）
+典型位置：compiler/plugins/input/*
+GlobalOptimization pass（你说的 globalzation）
+阶段：GlobalOptimization phase（在 Preprocessing 后、DispatchCreation 前）
+作用：模块级高层优化，如常量求值、代数化简、transpose 传播、精度相关优化等
+目标：在切 dispatch 之前把图尽量优化干净
+MLIR passes（你说的 milr pass）
+阶段：不固定，按需要穿插在各 phase
+作用：这是上游 MLIR 通用工具箱（canonicalize/CSE/inliner/bufferization/scf/linalg 等）
+说明：它不是一条独立 pipeline，而是被 IREE 各阶段调用的基础 pass 库
+CodegenPasses
+阶段：主要在 HAL/Executable* 相关后端 codegen 阶段
+作用：对每个 dispatch 做后端特化：tiling、vectorization、bufferization、lowering 到 LLVM/SPIR-V/ROCDL/VMVX/WGSL 等，并生成目标二进制片段
+典型位置：compiler/src/iree/compiler/Codegen/*
+AllIreePasses
+阶段：它本身不是执行阶段，是 IREE 自己 pass 的“总注册入口”
+作用：把 ABI/InputConversion/Preprocessing/GlobalOptimization/DispatchCreation/Flow/HAL/Stream/VM 等 IREE pass 全部注册
+真正执行时，还是由主 pipeline 按 phase 调度
+
+图级/高层融合
+常在 GlobalOptimization（以及部分 Preprocessing）做，目标是减少中间张量、暴露更大计算块。
+
+面向 dispatch 的融合
+在 DispatchCreation 阶段也会做“为了形成更优 dispatch”的融合与聚合。
+
+后端低层融合
+到 Codegen 还可能继续做局部融合（更偏 tile/loop/vector 层）。
