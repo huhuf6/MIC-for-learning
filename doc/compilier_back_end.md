@@ -138,3 +138,30 @@ llvm/lib/Target/*/*.td：定义 后端机器指令/寄存器/pattern（真正选
 指令选择完成后的MachineDAG内容虽然是机器指令，但仍然是以DAG形式存在，CPU/GPU不能执行DAG，只能执行指令的线性序列。寄存器分配前的指令调度的目的就是通过给DAG节点指定执行顺序将DAG线性化。最简单的办法就是将DAG按拓扑结构排序，但LLVM backend用更智能的方法调度指令使其运行效率更高
 
 MachineInstr(MI)
+
+# Code Emission
+
+<target>AsmPrinter 在 MachineFunction 层工作
+先输出函数头（label、对齐、section 等）。
+遍历每个 MachineBasicBlock、每条 MachineInstr。
+调后端  重载的 EmitInstruction(const MachineInstr*)。
+
+在 EmitInstruction 里先做 MI -> MCInst 降级
+MachineInstr 是“代码生成阶段”的复杂表示（含寄存器分配/伪指令等信息）。
+MCInst 是更接近最终汇编/机器码的轻量表示。
+这一步由目标后端的 MCInstLowering（或同等 lower 函数）完成。
+
+然后交给 MCStreamer 决定输出形态
+AsmPrinter::EmitToStreamer() 把 MCInst 送进 streamer。
+具体 streamer 有两条路：
+MCAsmStreamer：产出文本汇编（.s）
+MCObjectStreamer：产出目标文件机器码（.o）
+
+文本汇编路径
+MCAsmStreamer::emitInstruction 被调用。
+目标后端的 MCInstPrinter::printInst 把 MCInst 格式化成目标汇编语法并写文件。
+
+二进制目标文件路径
+MCObjectStreamer::emitInstruction 被调用。
+目标后端的 MCCodeEmitter::encodeInstruction 把 MCInst 编码成字节序列。
+再由 MC 层写入 .o 的 section/relocation 等结构。
