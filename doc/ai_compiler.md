@@ -1,0 +1,2 @@
+ML编译器核心问题主要有三部分：auto-tensorize、auto-tiling和auto-schedule。当然在分布式场景里还有一系列问题，这里暂时先不讨论。auto-tensorize就是怎么自动化TVM里面的tensorize原语，利用好硬件上的粗粒度intrinsic指令，auto-tiling就是怎么切块利用好芯片上的share memory（或者cache等片上缓存等价物），auto-schedule就是各种loop变换了。
+
