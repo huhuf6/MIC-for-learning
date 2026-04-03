@@ -253,96 +253,29 @@ precisely target transformations at specific operations
 ✔ loop reordering
 ✔ mapping to GPU
 
-# ONNX -> MLIR
-ONNX Model (.onnx)
-    ↓
-ONNX Dialect (MLIR)
-    ↓
-Krnl Dialect（中间层）
-    ↓
-Affine / LLVM
-PyTorch
-  ↓ export
-ONNX
-  ↓ importer
-Torch MLIR Dialect
-# PyTorch -> MLIR
-PyTorch
-   ↓
-Torch IR
-   ↓
-Torch Dialect (MLIR)
-   ↓
-StableHLO / Linalg
-   ↓
-后端
-FX = PyTorch 的 Graph IR（Python级别）
-PyTorch model 
-   ↓ torch.fx.symbolic_trace
-FX Graph
-   ↓
-Torch-MLIR Importer
-   ↓
-Torch Dialect (MLIR)
+# mlir lowering
+有，而且你已经抓到核心了。MLIR lowering 常见设计哲学可以概括为这几条：
 
-| 特性       | PyTorch | ONNX  |
-| -------- | ------- | ----- |
-| 动态 shape | ✅       | ❌     |
-| 控制流      | 强       | 弱     |
-| 原生 op    | aten    | 标准 op |
+渐进降级（Progressive Lowering）
+不追求一步到位，分层逐步把高语义变成低语义。
 
-# IREE
-Frontend → High-level IR → Dispatch → Device IR → HAL → Backend
-PyTorch / ONNX
-    ↓
-StableHLO / Torch Dialect
-    ↓
-Linalg
-    ↓
-Flow Dialect（分发/切分）
-    ↓
-Stream Dialect（执行/调度）
-    ↓
-HAL Dialect（硬件抽象）
-    ↓
-LLVM / GPU / Vulkan / Metal
+语义保留到最后一刻（Preserve Semantics Late）
+在能优化的阶段尽量保留结构信息（如 linalg 的索引映射、并行/归约语义），避免过早摊平成“丑 IR”。
 
-| 层         | 作用   |
-| --------- | ---- |
-| StableHLO | 表达模型 |
-| Linalg    | 优化计算 |
-| Flow      | 切分计算 |
-| Stream    | 调度执行 |
-| HAL       | 抽象硬件 |
-| Backend   | 生成代码 |
+关注点分离（Separation of Concerns）
+类型、控制流、数据布局、算术、设备执行分别交给不同 dialect/pass 处理。
 
-# 工业pipeline
-工业真实 pipeline（最重要）
-✅ 路径1：PyTorch → 部署
-PyTorch
-   ↓
-Torch MLIR
-   ↓
-ONNX 或 StableHLO
-   ↓
-Linalg
-   ↓
-Codegen (LLVM / CUDA / Vulkan)
-✅ 路径2：ONNX 生态（最常见）
-ONNX
-   ↓
-ONNX dialect
-   ↓
-Linalg / TOSA
-   ↓
-后端
-✅ 路径3：Google / OpenXLA 路径
-JAX / TF
-   ↓
-StableHLO
-   ↓
-Linalg / GPU dialect
-   ↓
-Codegen
+合法化驱动（Legality-Driven）
+每个 pass 都有“目标 dialect 合法集合”，通过 conversion pattern 把非法 op 逐步清空。
 
-# tvm
+可组合、可插拔（Composable/Extensible）
+pipeline 可按前端/后端拼装，插件可在 Input 等阶段注入。
+
+先规范化再优化（Canonicalize then Optimize）
+大量 canonicalize/CSE 穿插在 lowering 中，保证模式匹配稳定、后续优化收益更高。
+
+多层 IR 为多类优化服务（Right Level for Right Optimization）
+算子融合/分块常在 linalg，控制流细化在 scf，更底层指令化在 llvm/gpu 等，不强行在单层做完所有事。
+
+一句话：
+MLIR 的 lowering 不是“降成越低越好”，而是“在每一层保留恰好足够的语义来做那一层最有效的优化”。

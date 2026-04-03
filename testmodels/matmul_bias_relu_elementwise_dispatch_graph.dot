@@ -1,0 +1,41 @@
+digraph G {
+  compound = true;
+  subgraph cluster_1 {
+    v2 [shape = plain, label = " "];
+    label = "";
+    v3 [shape = box, label = "arg0"];
+    v4 [shape = box, label = "arg1"];
+    v5 [shape = box, label = "arg2"];
+    v6 [shape = ellipse, label = "%__constant_tensor_8x16xf32 = util.global.load\ntensor<8x16xf32>"];
+    v7 [shape = ellipse, label = "%0 = hal.tensor.import\n<<NULL ATTRIBUTE>>\ntensor<2x8xf32>"];
+    v8 [shape = box, label = "%1 = flow.dispatch[]\n@main$async_dispatch_0::@main$async_dispatch_0_matmul_2x16x8_f32(%0, %__constant_tensor_8x16xf32)\n<<NULL ATTRIBUTE>>\ntensor<2x16xf32>"];
+    v9 [shape = ellipse, label = "%2 = hal.tensor.barrier\ntensor<2x16xf32>"];
+    v10 [shape = ellipse, label = "%3 = hal.tensor.export\n<<NULL ATTRIBUTE>>\n!hal.buffer_view"];
+    v11 [shape = ellipse, label = " = util.return\n"];
+  }
+  subgraph cluster_12 {
+    v13 [shape = plain, label = " "];
+    label = "";
+    v14 [shape = box, label = "arg0"];
+    v15 [shape = ellipse, label = "%0 = util.null\n!hal.fence"];
+    v16 [shape = ellipse, label = "%device_0 = hal.devices.get\n!hal.device"];
+    v17 [shape = ellipse, label = "%fence = hal.fence.create\n!hal.fence"];
+    v18 [shape = ellipse, label = "%1 = util.call\n!hal.buffer_view"];
+    v19 [shape = ellipse, label = "%status = hal.fence.await\ni32"];
+    v20 [shape = ellipse, label = " = util.return\n"];
+  }
+  v3 -> v7 [style = solid, label = "0"];
+  v4 -> v7 [style = solid, label = "1"];
+  v7 -> v8 [style = solid, label = "0"];
+  v6 -> v8 [style = solid, label = "1"];
+  v8 -> v9 [style = solid, label = "0"];
+  v5 -> v9 [style = solid, label = "1"];
+  v9 -> v10 [style = solid, label = ""];
+  v10 -> v11 [style = solid, label = ""];
+  v16 -> v17 [style = solid, label = ""];
+  v14 -> v18 [style = solid, label = "0"];
+  v15 -> v18 [style = solid, label = "1"];
+  v17 -> v18 [style = solid, label = "2"];
+  v17 -> v19 [style = solid, label = "1"];
+  v18 -> v20 [style = solid, label = ""];
+}

@@ -292,7 +292,7 @@ AllIreePasses
 作用：把 ABI/InputConversion/Preprocessing/GlobalOptimization/DispatchCreation/Flow/HAL/Stream/VM 等 IREE pass 全部注册
 真正执行时，还是由主 pipeline 按 phase 调度
 
-图级/高层融合
+图级/高层融合 ?
 常在 GlobalOptimization（以及部分 Preprocessing）做，目标是减少中间张量、暴露更大计算块。
 
 面向 dispatch 的融合
@@ -300,3 +300,175 @@ AllIreePasses
 
 后端低层融合
 到 Codegen 还可能继续做局部融合（更偏 tile/loop/vector 层）。
+
+# pipelines in code
+buildIREEPrecompileTransformPassPipeline()
+
+## input conversion passes
+
+## ABI binding
+IREE 运行时参数约定（buffer/buffer_view 级别边界）
+调用模型细节（sync vs coarse-fences）
+统一反射/入口封送格式（runtime 直接消费的那套）
+## AssignmentOptions(参数指定target会提前)
+如果你在编译参数里指定了目标设备（比如 cuda、vulkan-spirv、llvm-cpu），编译器会先把这些“目标信息”挂到模块 IR 上。
+后面很多 pass 会读取这些信息，按目标设备做决策（选哪条 lowering、用哪些优化、生成哪个后端 executable）。
+如果你想生成“通用/不绑定具体设备”的结果，就不要提前指定 target，这样 pipeline 不会过早做设备特化。
+## preprocessing(可选)
+## GlobalOptimization
+参数导入（可选）
+位置：Passes.cpp (line 93)
+逻辑：
+parameterImportPaths 非空才启用。
+组装 scopePaths/keys/maximumSize。
+加 ImportParametersPass。
+目的：让后续 folding 能看到外部参数常量。
+### 预处理与初始规范化（函数级）
+位置：Passes.cpp (line 109)
+主要 pass：
+WarnOnUninitializedValues（受 clWarnOnUninitializedValues 控制）
+StripDebugOps（stripAssertions 开启时）
+OptimizeIntArithmetic
+LinalgQuantizedConvToConv / LinalgQuantizedMatmulToMatmul
+ConvertConv2DToImg2Col（useIm2colForConvs）
+Flow::Canonicalize / RemoveZeroExtentTensors / DetachElementwiseFromNamedOps / SimplifyDepthwiseConv
+然后模块级加：EraseUnusedLinalgOperandsPass。
+### 张量形状 SSA 展开（模块级）
+位置：Passes.cpp (line 126)
+ExpandTensorShapesPass
+目的：提升 shape 维度等价发现能力，利于后面融合与重写。
+### 结构重写与 barrier/维度折叠准备
+位置：Passes.cpp (line 131)
+函数级 pass：
+ConvertElementwiseToLinalg
+RaiseSpecialOps（第一次）
+DecomposeConcatPass(outerDimConcat)
+GeneralizeLinalgNamedOpsPass(enableGeneralizeMatmul)
+InsertTensorBarriersPass（!clEnableEdgeReshapePropagation 时）
+模块级：FoldUnitExtentDimsPass。
+### 单元维折叠后再清理 + 转置传播前整形
+位置：Passes.cpp (line 158)
+函数级 pass：
+FoldReshapesIntoTensorBarriersPass
+DemoteContractionInputsToBF16Pass（策略来自 clDemote...）
+可选 FuseDequantizationMatmulPass
+Flow::Canonicalize + CSE
+可选 PropagateLinalgTransposePass（由多个 transpose 相关选项控制）
+再 Flow::Canonicalize + CSE
+模块级再加：ConvertStridedContractionToContractionPass。
+### Data tiling / encoding 分支（可选）
+位置：Passes.cpp (line 194)
+条件：transformOptions.dataTiling
+执行：
+函数级 AnnotateDataTilingHintsPass
+函数级 SetEncodingPass
+可选模块级 MaterializeHomogeneousEncodingsPass（clEnableEarlyMaterialization）
+Flow::Canonicalize + CSE + SimplifyPackUnpackPass
+函数级 DataLayoutPropagationPass
+### 全局清理与 IPO
+位置：Passes.cpp (line 211)
+函数级：
+GeneralizeLinalgNamedOpsPass（第二次，收尾泛化）
+GlobalLoopInvariantCodeMotionPass
+Flow::Canonicalize + CSE
+SimplifyGlobalAccessesPass
+ApplyPatternsPass
+模块级：
+FoldGlobalsPass
+IPOPass
+再函数级：
+OptimizeIntArithmetic + Flow::Canonicalize + CSE
+### 常量表达式 hoist（可选）
+位置：Passes.cpp (line 237)
+条件：constExprHoisting
+执行：buildGlobalOptExprHoistingPassPipeline，核心是 HoistIntoGlobalsPass，阈值由 constExprMaxSizeIncreaseThreshold 控制。
+相关实现入口：Passes.cpp (line 80)
+### Const-eval（可选，hook 注入）
+位置：Passes.cpp (line 241)
+条件：buildConstEvalPassPipeline 非空
+执行：调用外部注入的 const-eval pass pipeline。
+### 数值精度优化（可选）
+位置：Passes.cpp (line 245)
+条件：numericPrecisionReduction
+三步：
+InferNumericNarrowingPass
+OptimizeNumericsPass
+CleanupNumericNarrowingPass
+### 最后一轮函数级收尾
+位置：Passes.cpp (line 251)
+Flow::Canonicalize + CSE
+RaiseSpecialOps（第二次，捕捉新机会）
+### 参数导出与 splat 归档（可选）
+位置：Passes.cpp (line 258)
+parameterExportPath 非空 -> ExportParametersPass
+parameterSplatPath 非空 -> GenerateSplatParameterArchivePass
+注意它放在 const-eval 后，代码注释已明确解释原因。
+
+## DispatchCreation
+buildDispatchCreationPassPipeline 做的是：把高层 tensor/linalg IR 经过融合、reshape/encoding 处理，先形成 flow.dispatch.region，再降成 flow.dispatch.workgroup，并补齐 workload/workgroup-count 与边界类型处理。
+
+完整执行顺序
+
+### 早期注入 tracing
+InjectTensorTracingPass，先插桩，避免后续形成 dispatch 后看不到原始值。
+见 Passes.cpp (line 309)
+
+### 可选 pad 降级（WAR 路径）
+当 !enablePadHandling && !clEnableFusePaddingIntoLinalgProducerOps 时，跑 TensorPadToTensorInsertSlicePass。
+见 Passes.cpp (line 314)
+
+### 固定点 IPO 清理循环
+构建一个模块级 ipoPipeline，内容是 canonicalize + cse + simplify_global_accesses + apply_patterns + fold_globals + fuse_globals + ipo，再用 FixedPointIteratorPass 反复迭代到稳定。
+见 Passes.cpp (line 325) 和 Passes.cpp (line 70)
+
+### 融合前预处理
+FusionPreprocessingPass + canonicalize + cse。
+见 Passes.cpp (line 341)
+
+### Dispatch 形成前的“形态整理”子流水线
+由 addDispatchRegionCreationPreprocessingPasses 加入，核心顺序：
+
+Elementwise fusion（第一次，intraDispatch=false）
+FoldReshapesIntoTensorBarriers + BubbleUpExpandShapes（可跨 reduction 由 enableAggressiveReshapeMovement 控制）
+Elementwise fusion（第二次）
+SinkReshapes
+可选 FuseHorizontalContractions
+可选 FuseMultiUseElementwiseProducer（enableFuseMultiUse）
+SplitReduction + 可选 SetSplitReductionSizes（enableSplitReduction）+ FormSplitReductionDispatches（可启 enableFusePaddingIntoLinalgConsumerOps）
+TransposeGenericOps + PropagateEncodings
+可选 HoistIntoGlobals（constExprHoisting）+ canonicalize/cse
+见 Passes.cpp (line 98)
+### 真正形成 dispatch region
+由 addDispatchRegionCreationPasses 加入，核心顺序：
+
+FormScalarDispatches（标量 root）
+FormDispatchRegions（按 root 聚合并做 producer/consumer fusion，受 enableAggressiveFusion 和 padding fusion 选项影响）
+dispatch 内 elementwise fusion（intraDispatch=true）
+dispatch 内 multi-use fusion（固定 32 次迭代）
+CloneProducersIntoDispatchRegions
+CollapseDimensions
+HoistUniformScalarCompute
+见 Passes.cpp (line 205)
+### 可选 data-tiling/encoding 分支
+当 dataTiling=true：
+
+canonicalize(cseConstants=false)
+AnnotateDataTilingHints
+SetEncoding（策略由 clSetEncodingStrategy）
+模块级 HoistEncodingOps
+然后无论是否 data-tiling 都会：
+FuseEncodingOpsIntoDispatchRegions（可受实验开关影响）
+ConvertEncodingToFlow
+可选 HoistIntoGlobals（再次 hoist encoding 常量表达式）
+RemoveTensorBarriers
+见 Passes.cpp (line 253)
+### region -> workgroup + 边界收尾
+函数级顺序：
+
+ConvertDispatchRegionsToWorkgroups
+ConvertTensorToFlow
+cse + canonicalize
+MaterializeDefaultWorkgroupCountRegion（生成 workload 到 workgroup-count 的默认计算区）
+BitcastUnsupportedElementTypes（dispatch 边界不支持类型的位转换）
+cse + canonicalize
+见 Passes.cpp (line 350)

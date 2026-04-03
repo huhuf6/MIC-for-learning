@@ -138,6 +138,165 @@ llvm/lib/Target/*/*.td：定义 后端机器指令/寄存器/pattern（真正选
 指令选择完成后的MachineDAG内容虽然是机器指令，但仍然是以DAG形式存在，CPU/GPU不能执行DAG，只能执行指令的线性序列。寄存器分配前的指令调度的目的就是通过给DAG节点指定执行顺序将DAG线性化。最简单的办法就是将DAG按拓扑结构排序，但LLVM backend用更智能的方法调度指令使其运行效率更高
 
 MachineInstr(MI)
+指令调度时会再构建一个用于调度的依赖图（常叫 ScheduleDAG），然后在满足依赖的前提下，结合延迟/端口/资源模型选顺序。
+所以它不是“纯拓扑排序”，而是带成本模型的拓扑调度
+
+1) 调度在后端流水线的位置
+
+PreRA 调度：MachineSchedulerPass() 在寄存器分配前运行。见 CodeGenPassBuilder.h (line 1083)。
+PostRA 第二次调度：PostMachineSchedulerPass() 或 PostRASchedulerPass()。见 CodeGenPassBuilder.h (line 879)。
+2) 调度器实例如何选择
+
+MachineScheduler::createMachineScheduler() 优先用目标自定义；否则回退 GenericScheduler。见 MachineScheduler.cpp (line 368)。
+目标可通过 TargetPassConfig::createMachineScheduler/createPostMachineScheduler 注入策略。见 TargetPassConfig.h (line 278)。
+3) 调度图怎么建（核心数据结构）
+
+每条 MI 先变成一个 SUnit，并记录指令延迟 SU->Latency = SchedModel.computeInstrLatency(...)。见 ScheduleDAGInstrs.cpp (line 576) 和 ScheduleDAGInstrs.cpp (line 592)。
+添加寄存器依赖：data/anti/output（物理寄存器、虚拟寄存器）。见 ScheduleDAGInstrs.cpp (line 848)。
+添加内存依赖：alias/非 alias、barrier、call/副作用。见 ScheduleDAGInstrs.cpp (line 895)。
+调度图按 region 构建，遍历基本块中的可调度区间。见 MachineScheduler.cpp (line 562)。
+4) 成本模型来自哪里
+
+TargetSchedModel 封装 MCSchedModel，提供 issue width(发射宽度)、资源、buffer、latency 等接口。见 TargetSchedule.h (line 30)。
+关键接口包括 getIssueWidth/getNumMicroOps/computeOperandLatency/computeInstrLatency。见 TargetSchedule.h (line 97)。
+5) GenericScheduler 的策略模型（最关键）
+
+双边界调度：维护 Top/Bottom 两个 ready queue，双向收缩 unscheduled zone。见 MachineScheduler.h (line 1260) 和 MachineScheduler.cpp (line 3615)。
+每轮先设策略 setPolicy：判定当前更偏“降延迟”还是“降资源冲突/平衡需求”。见 MachineScheduler.cpp (line 2983)。
+候选比较是分层启发式（非单一分数），优先级顺序由 CandReason 和 tryCandidate 体现。见 MachineScheduler.h (line 1071) 和 MachineScheduler.cpp (line 3479)。
+主要比较维度：
+物理寄存器邻近性（减少不良 live range）见 MachineScheduler.cpp (line 3488)
+寄存器压力（Excess/Critical/Max）见 MachineScheduler.cpp (line 3493)
+stall/cluster/weak edge 见 MachineScheduler.cpp (line 3521)
+资源消耗与需求平衡（ResourceReduce/ResourceDemand）见 MachineScheduler.cpp (line 3558)
+延迟链（tryLatency）见 MachineScheduler.cpp (line 3570)
+6) PreRA vs PostRA 的核心差异
+
+PreRA 会跟踪寄存器压力，避免把 vreg 压爆导致 spill。见 MachineScheduler.cpp (line 3437)。
+PostRA 默认不跟踪压力，偏向 latency/资源层面的收尾优化。见 MachineScheduler.h (line 1310)。
+还有 legacy 的 PostRASchedulerList（TDList+反依赖打断）路径。见 PostRASchedulerList.cpp (line 262)。
+7) 一句话模型总结
+LLVM 后端调度 =
+依赖正确性约束（SUnit DAG） + 目标机微架构模型（MCSchedModel） + 分层启发式双向列表调度（Top/Bottom） + PreRA/PostRA 两阶段优化。
+
+## 指令选择阶段已经有DAG了,为什么调度阶段还要用DAG？
+
+因为这是两种不同层级、不同目标的 DAG。
+
+指令选择阶段（SelectionDAG）的 DAG：
+主要表示 IR 语义与合法化过程，用来“选成什么机器指令”。
+
+调度阶段（ScheduleDAGInstrs / MachineScheduler）的 DAG：
+主要表示机器指令之间的调度依赖（数据、内存、资源、延迟），用来“这些机器指令按什么顺序发射更快”。
+
+# Register Allocation
+经过指令选择阶段产生的代码是SSA形式的，即静态单赋值。这些代码假定可以使用无限多的虚拟寄存器。这当然是不可能的。因此接下来要执行寄存器分配，将无限的虚拟寄存器替换成有限的物理寄存器。如果物理寄存器数量不够用，虚拟寄存器就会被assing到内存，也就是spill slot。但也有例外，比如在x86的除法指令中，输入要保存在EDX和EAX寄存器中。指令选择阶段就已经知道这个限制，因此在那个时候，也就是select方法中就会为除法指令分配物理寄存器而不必等到寄存器分配阶段。
+
+Register Allocation (RA) 在 LLVM 里做的事可以概括成一句话：
+把 MachineInstr 里的虚拟寄存器（vreg）映射到物理寄存器（preg），冲突时通过“驱逐/拆分/溢出到栈”解决，最后把指令里的寄存器操作数真正改写成物理寄存器。
+
+1. RA 在流水线中的位置（你现在这条 optimized 路径）
+addOptimizedRegAlloc 会先做一些和 RA 强耦合的预处理（PHI 消除、两地址化、coalescing、PreRA 调度），然后进入 RA，再做重写和后处理。代码在 CodeGenPassBuilder.h (line 1062)、CodeGenPassBuilder.h (line 1029)。
+默认优化级别下会选 RAGreedy，选择逻辑在 CodeGenPassBuilder.h (line 998)。
+
+2. RA 前先准备“活跃区间”和冲突查询能力
+RAGreedy::runOnMachineFunction 初始化 LiveIntervals、LiveRegMatrix、VirtRegMap 等分析，再计算 spill weight/hint。见 RegAllocGreedy.cpp (line 2675)。
+LiveIntervals 会为每个 vreg 计算 live interval。见 LiveIntervals.cpp (line 120)、LiveIntervals.cpp (line 188)。
+
+3. RA 主循环（真正分配）
+通用驱动在 RegAllocBase::allocatePhysRegs：
+从队列取一个 vreg -> 调 selectOrSplit -> 成功则 assign -> 失败就产生新拆分区间继续入队。见 RegAllocBase.cpp (line 84)。
+队列初始化在 RegAllocBase.cpp (line 71)。
+
+4. Greedy 的决策顺序（核心）
+selectOrSplitImpl 的策略非常典型：
+先尝试空闲物理寄存器 -> 再尝试驱逐干扰者 -> 再尝试拆分 live range -> 最后 spill 到内存。见 RegAllocGreedy.cpp (line 2377)。
+驱逐逻辑在 RegAllocGreedy.cpp (line 484)。
+spill 发生时通过 spiller 插入 load/store，并生成新的区间继续分配，见同函数里 spiller().spill(...)（RegAllocGreedy.cpp (line 2467)）。
+
+5. 干扰是怎么判定的
+LiveRegMatrix::checkInterference 统一检查三类冲突：
+regmask 冲突、固定物理寄存器单元冲突、其他 vreg 冲突。见 LiveRegMatrix.cpp (line 186)。
+分配与撤销分别在 LiveRegMatrix.cpp (line 104)、LiveRegMatrix.cpp (line 121)。
+
+6. spill 到哪儿、怎么落地
+栈槽由 VirtRegMap 分配（createSpillSlot / assignVirt2StackSlot），见 VirtRegMap.cpp (line 93)、VirtRegMap.cpp (line 122)。
+
+7. 最终“改写”阶段（把 vreg 真正消掉）
+VirtRegRewriter 是 RA 末端：
+先补 kill/live-in，再把每个 MO 的 vreg 改成 preg，处理 copy bundle、删 identity copy，最后函数属性变成 NoVRegs。见 VirtRegMap.cpp (line 183)、VirtRegMap.cpp (line 256)、VirtRegMap.cpp (line 535)。
+
+你可以把 RA 理解成这条闭环：
+LiveIntervals 建模 -> Greedy 分配/驱逐/拆分/spill -> VirtRegMap 记录映射 -> VirtRegRewriter 实际改写指令并清除 vreg。
+
+DetectDeadLanesPass()
+识别子寄存器里“实际上不会再被用到”的 lane，给后续合并/分配减少噪音和寄存器压力。
+
+ProcessImplicitDefsPass()
+处理 implicit-def（隐式定义）相关语义，规范化活跃性信息，避免后续分析把未定义值当成有效值。
+
+PHIEliminationPass()
+把机器级 PHI 降成前驱块里的 copy/move（必要时拆边）。RA 之前必须做，因为 RA 不直接处理 PHI 形式。
+
+LiveIntervalsPass()（可选，Opt.EarlyLiveIntervals）
+提前计算 live interval，给后续 pass/启发式更早提供活跃区间信息。
+
+TwoAddressInstructionPass()
+把两地址约束指令（def 和一个 use 必须同寄存器）改写成可分配形式，必要时插入 copy。
+
+RegisterCoalescerPass()
+做寄存器合并：尽量消掉 COPY，让相关虚拟寄存器共用同一物理寄存器，减少 move 并改善 RA 质量。
+
+RenameIndependentSubregsPass()
+把互不相关的子寄存器定义重命名/拆开，避免调度移动后形成断裂或错误依赖，也常能改善分配质量。
+
+MachineSchedulerPass()（PreRA 调度）
+在寄存器分配前做机器指令调度，按依赖/延迟/资源模型重排指令，提升吞吐和隐藏延迟。
+满足依赖约束（数据/内存/副作用不破坏语义）
+根据目标 CPU 的延迟与资源模型减少 stall、提升吞吐
+在性能和寄存器压力之间做权衡（PreRA 特别关注别把压力抬太高，避免后面 spill）
+
+derived().addRegAssignmentOptimized(addPass)
+真正进入“优化版寄存器分配”阶段（目标可选 greedy/basic/pbqp 等），并做重写相关步骤（如 VirtRegRewriter、StackSlotColoring）。
+
+derived().addRegAssignmentOptimized(addPass)
+先执行“优化版寄存器分配主流程”（选 RA、分配、重写 vreg 到物理寄存器，及相关步骤）。
+if (...) 的意思是：只有这一步按该目标配置启用/成功后，才继续后面的清理优化。
+
+derived().addPostRewrite(addPass)
+目标后端钩子：在寄存器已确定后，展开或修正依赖“具体物理寄存器选择”的伪指令。
+
+MachineCopyPropagationPass()
+RA 后再做一次 copy 传播，尽量消掉没被 coalesce 掉的 COPY，转发寄存器使用。
+
+MachineLICMPass()
+机器级 LICM（RA 后）：尝试把 reload/remat 等从循环里上提，减少热路径开销。
+# Code Emission
+
+<target>AsmPrinter 在 MachineFunction 层工作
+先输出函数头（label、对齐、section 等）。
+遍历每个 MachineBasicBlock、每条 MachineInstr。
+调后端  重载的 EmitInstruction(const MachineInstr*)。
+
+在 EmitInstruction 里先做 MI -> MCInst 降级
+MachineInstr 是“代码生成阶段”的复杂表示（含寄存器分配/伪指令等信息）。
+MCInst 是更接近最终汇编/机器码的轻量表示。
+这一步由目标后端的 MCInstLowering（或同等 lower 函数）完成。
+
+然后交给 MCStreamer 决定输出形态
+AsmPrinter::EmitToStreamer() 把 MCInst 送进 streamer。
+具体 streamer 有两条路：
+MCAsmStreamer：产出文本汇编（.s）
+MCObjectStreamer：产出目标文件机器码（.o）
+
+文本汇编路径
+MCAsmStreamer::emitInstruction 被调用。
+目标后端的 MCInstPrinter::printInst 把 MCInst 格式化成目标汇编语法并写文件。
+
+二进制目标文件路径
+MCObjectStreamer::emitInstruction 被调用。
+目标后端的 MCCodeEmitter::encodeInstruction 把 MCInst 编码成字节序列。
+再由 MC 层写入 .o 的 section/relocation 等结构。
 
 # Code Emission
 
