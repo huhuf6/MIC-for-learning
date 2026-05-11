@@ -472,3 +472,249 @@ MaterializeDefaultWorkgroupCountRegion（生成 workload 到 workgroup-count 的
 BitcastUnsupportedElementTypes（dispatch 边界不支持类型的位转换）
 cse + canonicalize
 见 Passes.cpp (line 350)
+
+
+# Iree各个阶段的核心功能
+
+## DispatchCreation
+
+核心功能：
+
+把经过 GlobalOptimization 之后的高层 tensor/linalg/scf/cf IR，重新组织成后续可独立 codegen 的 dispatch 单元。这个阶段最重要的不是“降到某个低层后端 IR”，而是先决定：
+
+- 哪些算子应该融合到同一个 dispatch
+- 哪些 producer 值得 clone 到 consumer 侧
+- dispatch 边界上的 shape / encoding / element type 该如何表达
+- 如何把还停留在高层语义的计算块收束成 `flow.dispatch.region` / `flow.dispatch.workgroups`
+
+核心 pass：
+
+- `createFusionPreprocessingPass`
+  - 在正式 form dispatch 前做面向融合的预整理
+- `createFormDispatchRegionsPass`
+  - 根据 use-def 链、可融合规则等形成 `flow.dispatch.region`
+- `createSplitReductionPass`
+  - 把 reduction 拆成更适合形成 dispatch 的结构
+- `createFormSplitReductionDispatchesPass`
+  - 为 split reduction 形成专门 dispatch
+- `createTransposeGenericOpsPass`
+  - 调整 generic op 迭代器/索引结构，提升 dispatch 形成与后续 codegen 质量
+- `createFuseHorizontalContractionsPass`
+  - 对并排 contraction 做更激进聚合
+- `createCloneProducersIntoDispatchRegionsPass`
+  - 把便宜 producer clone 到 dispatch 内，减少跨 dispatch 依赖
+- `createCollapseDimensionsPass`
+  - 折叠可安全 collapse 的连续维，降低 rank，减少后续索引复杂度
+- `createAnnotateDataTilingHintsPass`
+  - 给后续 encoding / codegen 提供 tiling hint
+- `createSetEncodingPass`
+  - 给 matmul 等 contraction 类 op 的 operand/init/result 加 `iree_encoding.set_encoding`
+- `createHoistEncodingOpsPass`
+  - 尽量把 encoding/unset_encoding 提到 dispatch 外
+- `createFuseEncodingOpsIntoDispatchRegionsPass`
+  - 对必须留在 dispatch 内的 encoding 相关 op 进行融合
+- `createConvertEncodingToFlowPass`
+  - `iree_encoding.set/unset_encoding` -> `flow.tensor.encode`
+- `createFormScalarDispatchesPass`
+  - 把纯标量计算也组织成 dispatch
+- `createConvertDispatchRegionsToWorkgroupsPass`
+  - `flow.dispatch.region` -> `flow.dispatch.workgroups`
+- `createConvertTensorToFlowPass`
+  - 把 dispatch 边界附近的 tensor op 改写成 `flow.tensor.*`
+- `createMaterializeDefaultWorkgroupCountRegionPass`
+  - 为 workload 自动补默认的 `count(...) -> (x, y, z)` 区域
+- `createBitcastUnsupportedElementTypesPass`
+  - 修正 dispatch 边界上不适合直接传递的 element type
+
+核心算法：
+
+1. 图分区 / 语义融合
+   - 沿 use-def 链把可融合 producer/consumer 合并到同一个 dispatch。
+   - 本质上是在做“高层算子图切分”，目标是形成更少、更大、更适合后续 codegen 的 kernel 边界。
+
+2. clone-to-consumer
+   - 对便宜 producer，不强制跨 dispatch 共享，而是复制到各个 consumer 所在 dispatch。
+   - 这是用“多算一点”换“更少同步和更短 live range”的典型做法。
+
+3. rank reduction / dimension collapse
+   - 对 layout 和 indexing map 允许的 op，把多维张量折叠成更低 rank 甚至 1D。
+   - 这样后续 dispatch 内索引、workload 推导和 codegen 都更简单。
+
+4. encoding 路径前移
+   - 在高层就先把“这个 op 需要什么 layout/encoding”表达出来，而不是等到后端再临时猜。
+   - 这样后续 Flow/Stream 可以把 encoding 变成显式资源变换与专门 dispatch。
+
+一句话：
+
+`DispatchCreation` 负责把高层算子图切成“后续可单独编译的 dispatch 单元”，同时把融合、clone、collapse、encoding 这些决定 kernel 形状的关键选择提前做掉。
+
+## Flow
+
+核心功能：
+
+Flow 层负责把“dispatch 是一段区域里的计算”进一步拆成：
+
+- 可复用、可导出的 executable 代码体
+- 外部调用点上的 `flow.dispatch`
+- 显式的 workload / workgroup_count / 动态维绑定
+
+也就是把“计算内容”和“如何调度它”这两部分正式拆开。
+
+核心 pass：
+
+- `createInitializeEmptyTensorsPass`
+  - 把空 tensor 初始化成 Flow 可继续追踪的形式
+- `createCaptureDynamicDimsPass`
+  - 把原本依赖 use-def 才能恢复的动态维，显式化成 SSA / block args / iter_args
+  - 并通过 `flow.tensor.tie_shape`、`flow.dispatch.tie_shape` 重新绑定回 tensor
+- `createOutlineDispatchRegionsPass`
+  - `flow.dispatch.workgroups`
+    -> `flow.executable` + `flow.executable.export` + `flow.dispatch`
+- `createOutlineDispatchExternsPass`
+  - `hal.dispatch.extern` -> executable/export/dispatch 形式
+- `createAnnotateDispatchesPass`
+  - 给 executable/dispatch 补充可分析、可 profiling 的注释信息
+- `createDeduplicateExecutablesPass`
+  - 合并内容相同的 executable
+- `createOutlineConstantsPass`
+  - 把常量 outline 成全局/加载形式，减小 executable 和函数体中的重复常量
+- `createCleanupTensorShapesPass`
+  - 清理 Flow 阶段残留的 shape/tensor 辅助结构
+
+核心算法：
+
+1. 动态维显式捕获
+   - 不是重新推 shape，而是把“原来隐含在 use-def 里的动态维信息”显式带出来。
+   - 这样 outline 之后，dispatch 边界不再依赖外部隐式约束。
+
+2. region outline
+   - 把内联的 `flow.dispatch.workgroups` body 复制成 executable 里的 entry function。
+   - 同时把原来的 `count(...)` region 搬到 `flow.executable.export workgroups(...)` 上。
+
+3. executable 去重
+   - 如果多个 dispatch 的代码体完全相同，就尽量复用同一个 executable。
+   - 这是典型的“代码去重 + 编译产物减小”优化。
+
+一句话：
+
+`Flow` 负责把 dispatch 从“内联区域”整理成“executable + export + 调用点”的结构，让计算体、workgroup 计数和调用语义彻底分离。
+
+## Stream
+
+核心功能：
+
+Stream 层开始把“逻辑 tensor 计算”真正变成“异步资源执行图”。这一层最重要的转变是：
+
+- tensor 不再只是逻辑值，而是逐步映射成 `!stream.resource`
+- dispatch 不再只是普通调用，而是资源区间上的 `stream.async.dispatch`
+- 依赖关系不再只是隐式 use-def，而是显式 `timepoint`
+- 后面还会继续落成 `stream.cmd.*`，把 allocation / subrange / dealloc 都显式化
+
+从 pipeline 结构上，Stream 可以再分成 4 小段：
+
+1. `stream tensor pipeline`
+   - 输入方言 -> `stream.tensor.*`
+2. `stream async pipeline`
+   - `stream.tensor.*` -> `stream.async.*`
+   - 并形成 execute/wave/timepoint 异步执行图
+3. `stream cmd pipeline`
+   - allocation/subrange/dealloc 显式化
+   - `stream.async.execute` -> `stream.cmd.execute`
+4. `stream optimization pipeline`
+   - 复用 allocation、消 timepoint、优化 dispatch bindings/operands
+
+核心 pass：
+
+- `createCloneToConsumersPass`
+  - 如果某个纯 producer 同时服务多个不同 affinity 的 consumer，先按 consumer 侧拆开
+- `createConvertToStreamPass`
+  - 输入方言 -> `stream.tensor.*`
+  - `tensor<T>` 扩展成 `[!stream.resource, index size]`
+- `createCombineInitializersPass`
+  - 合并初始化逻辑，便于后续 Stream 层统一调度
+- `createUnifyEncodingForGlobalsPass`
+  - 尽量统一 immutable global 的 encoding，降低内存占用
+- `createSpecializeEncodingsPass`
+  - 抽象 `EncodingAttr` -> 具体 `LayoutAttr`
+- `createEncodeHostTensorsPass`
+  - host/module/function 侧 `stream.tensor.*` -> `stream.async.*`
+- `createEncodeDeviceTensorsPass`
+  - executable 内 `stream.binding.subspan`、`dispatch.tensor.load/store` 调整成适合设备侧访问的形式
+- `createMaterializeEncodingsPass`
+  - `stream.tensor.encode` -> 专门的 `stream.executable` + `stream.async.dispatch`
+- `createLayoutSlicesPass`
+  - `stream.resource.pack` -> 显式 offset/size/align 算术
+- `createMaterializeCopyOnWritePass`
+  - 保守插入 copy-on-write 需要的 clone/transfer/update
+- `createElideAsyncCopiesPass`
+  - 再把不必要的 copy 删掉
+- `createEmplaceAllocationsPass`
+  - 先把可直接复用/内嵌的 allocation 机会就地吸收，减少后续无意义 alloc
+- `createRefineUsagePass`
+  - 细化 resource lifetime / usage，并补必要 transfer
+- `createVerifyAsyncAccessRangesPass`
+  - 在进入 cmd 层前校验 async 资源访问区间是否合法
+- `createScheduleExecutionPass`
+  - 把平铺的 `stream.async.*` 分区成 `stream.async.execute`
+- `createScheduleConcurrencyPass`
+  - 在 execute 内再分 wave，形成 `stream.async.concurrent`
+- `createPropagateTimepointsPass`
+  - 显式整理 `!stream.timepoint` 依赖链
+- `createMaterializeBuiltinsPass`
+  - 把 builtin 相关 op 展开成更显式形式
+- `createScheduleAllocationPass`
+  - 给 execute 结果和局部 transient 真正分配 backing storage
+  - `stream.async.execute` -> `stream.cmd.execute`
+- `createEmplaceTransientsPass`
+  - 尝试把 transient allocation 嵌入已有 storage
+- `createMaterializeTransientSizeQueriesPass`
+  - 把 transient size 查询物化成显式 size 计算
+- `createPackConstantsPass`
+  - 给常量资源分配 backing storage，并把 packed 常量展开成显式上传/存储逻辑
+- `createAutomaticReferenceCountingPass`
+  - 插入 retain/release / dealloc 相关显式生命周期管理
+- `createReuseAllocationsPass`
+  - 在优化阶段尝试复用不会增加 live range 的 allocation
+- `createElideTimepointsPass`
+  - 消去可证明冗余的 timepoint 依赖链
+- `createFuseDispatchBindingsPass`
+  - 融合 dispatch bindings，减少 binding 数量与子视图噪声
+- `createPackDispatchOperandsPass`
+  - 将 dispatch operand 打包成更适合后续 lowering 的形式
+
+核心算法：
+
+1. tensor -> resource 资源化
+   - `ConvertToStreamPass` 不是传统 memref bufferization，而是把 tensor 扩成 `!stream.resource + size`。
+   - 后续 `EncodeHostTensorsPass` 再把 `stream.tensor.slice/fill/update/...` 变成对 resource byte range 的操作。
+
+2. encoding 专门物化
+   - `stream.tensor.encode` 不再只是一层抽象语义，而是被物化成真正执行 layout transform 的 executable/dispatch。
+   - 同一类 `(sourceEncoding, resultEncoding)` 会缓存复用 executable。
+
+3. 异步执行图调度
+   - `ScheduleExecutionPass` 根据分区算法把 streamable op 组成 `stream.async.execute`。
+   - 这一步不是机器指令调度，而是 host 侧异步执行图成形。
+
+4. wave 并发划分
+   - `ScheduleConcurrencyPass` 在单个 execute 内，把可并发 op 分成多个 `stream.async.concurrent` wave。
+   - 这里的 wave 是“并发批次/并发层”，不是 GPU wavefront/warp。
+
+5. 资源生命周期与 allocation
+   - `ScheduleAllocationPass` 会：
+     - 把 execute 结果提前分配好 reservation
+     - 把局部 transient 按 liveness 打包成一个 slab
+     - 插入 `stream.resource.pack`、`stream.resource.alloca`、`stream.resource.dealloca`
+     - 最终把 `stream.async.execute` 改写成 `stream.cmd.execute`
+
+6. copy-on-write + usage refinement
+   - 先保守插入 copy/transfer/update，保证资源语义正确。
+   - 再通过 `RefineUsagePass` 和 `ElideAsyncCopiesPass` 收紧 lifetime、删掉不必要复制。
+
+7. binding / operand / timepoint 优化
+   - 在 cmd 之后继续做 allocation reuse、timepoint elision、binding fusion、operand packing。
+   - 这些优化不再改变大阶段语义，但会显著影响最终 dispatch ABI 和运行时开销。
+
+一句话：
+
+`Stream` 负责把 Flow 层的 dispatch 与 tensor 语义，系统性地变成“资源 + 异步执行图 + 显式 allocation/lifetime”的中后端 IR，是 IREE 从图优化走向 runtime/command 执行模型的关键桥梁。
