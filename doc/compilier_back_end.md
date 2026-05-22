@@ -324,3 +324,43 @@ MCAsmStreamer::emitInstruction 被调用。
 MCObjectStreamer::emitInstruction 被调用。
 目标后端的 MCCodeEmitter::encodeInstruction 把 MCInst 编码成字节序列。
 再由 MC 层写入 .o 的 section/relocation 等结构。
+
+# llvm jit(ORCV2)
+
+1.execution session
+是 ORC JIT 的顶层运行会话对象，负责持有全局运行环境，管理多个 JITDylib，并统一调度符号查找、物化、任务执行和资源生命周期
+jit的一个或多个实例构成一个session,包含jitdylibs,error reporting mechanisms,dispatch the materializaers
+2.jitaddress
+在jit中code 的具体address
+3.jitdylib
+存储其他module中的符号表,符号声明,而不是符号定义
+4.materializationUnit
+存储符号具体的定义 MaterializingInfos entries在jitdylib中,但未找到定义时它未空
+5.materializationresponsibility
+作为materializationUnit和jitdylib的桥梁,帮助声明找到定义
+6.mem manager
+管理内存,允许module内存访问外部C++内存(堆栈)
+7.layers
+分层concept,每一层都有对应的职责,并且下一层会获取上一层的结果
+compile layer linklayer
+用于PGO(profile guide optimazation) 上一次编译(粗)->分析->下一次编译(优化)
+
+## JIT design
+ExecutionSession
+├── JITDylib A
+│   ├── symbol table
+│   ├── materialization units
+│   └── definition generators
+├── JITDylib B
+└── lookup / task dispatch / resource management
+
+LLJIT
+├── ExecutionSession
+├── JITDylibs
+│   ├── Main 放你 JIT 的主程序代码
+│   ├── ProcessSymbols 映射宿主进程里的现成符号
+│   └── Platform 放 ORC runtime / 平台支持符号
+├── IRTransformLayer
+├── IRCompileLayer
+├── ObjectTransformLayer
+└── ObjectLinkingLayer
