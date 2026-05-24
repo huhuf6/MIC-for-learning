@@ -158,3 +158,47 @@ spill 后：
 split 不自然
 高度依赖 live range splitting
 graph coloring 不擅长这个。
+
+基于优先队列的ir寄存器 spill
+1. spill weight 
+“这个 virtual register 值多少钱”
+weight 高尽量别 spill  考虑use_count × loop_weight
+2. loop depth 执行次数越多,spill 越贵,提高 loop 内变量优先级
+3. use density  单位 live range 长度里的 use 密度,保留高 density 的值
+4. rematerializable 用计算比load store 更便宜
+5. register class 不同类型的数据只能存储在特定的寄存器
+spill
+
+为什么 LLVM Machine IR 不是纯 SSA
+1. two-address instruction 
+add rax, rbx  输入输出必须同寄存器,这不是SSA
+2. copies
+Machine IR 里大量COPY
+v1 -> a0
+用于：
+calling convention
+coalescing
+two-address lowering
+register constraint
+这些 copy导致
+live range overlap
+3. subregister
+寄存器可以部分访问。
+例如 x86：
+RAX
+EAX
+AX
+AL
+AH
+其实是同一个物理寄存器的不同部分
+LLVM需要建模subregister
+例如：
+低32位
+低16位
+低8位
+于是 interference不再简单。
+例如：
+AL 和 AX overlap
+AL 和高64位别的部分关系复杂。
+4. physreg constraints
+某些 instruction 强制使用特定物理寄存器
