@@ -799,3 +799,262 @@ heap coloring
 rematerialization tradeoff
 async overlap
 One-Shot Bufferize：
+
+将tensor.x op 打包改写成dps的linalg,
+在做extract_slice/update/等操作时,看似的 immutable SSA COPY,都变成了memref subview inplace alisa
+%t = tensor.extract_slice %s [%idx] [%sz] [1] : tensor<?xf32> to tensor<?xf32>
+%0 = linalg.generic ... outs(%t) { ... } -> tensor<?xf32>
+%1 = tensor.insert_slice %0 into %s [%idx] [%sz] [1]
+    : tensor<?xf32> into tensor<?xf32>
+
+%t = tensor.extract_slice %s -> %sub = memref.subview %buffer_of_s
+subview不是新内存,而是原buffer的一段view,alias 原内存
+linalg.generic对alias 原内存进行操作,能否直接修改,避免RAW,做
+alias legality analysis
+lifetime analysis
+RaW conflict analysis
+最后,tensor.insert_slice %0 可以不需要了,
+
+初始状态
+runtime 给你 memref
+中间
+转成 tensor
+做高层 tensor optimization
+最后
+materialize 回已有 buffer
+
+外部 runtime buffer
+↔ tensor compiler world
+↔ bufferized memref world
+
+## external model
+op延迟绑定interface,不造成循环依赖
+linalg.generic
+本身定义时并没有实现 BufferizableOpInterface，而是在：
+Linalg/Transforms/
+里额外注册：
+struct GenericOpInterface
+  : BufferizableOpInterface::ExternalModel<...>
+
+这样 One-Shot Bufferize 才知道
+result 是否 alias outs operand
+是否允许 inplace
+遇到写操作是否需要 copy
+如何从 tensor IR rewrite 到 memref IR
+
+但如果开启：
+-allow-unknown-ops
+则 One-Shot 会把 unknown op 当成黑盒处理，在边界插：
+bufferization.to_buffer
+bufferization.to_tensor
+即：
+tensor world
+  ↓
+memref black box
+  ↓
+tensor world
+这样 unknown op 不参与 One-Shot analysis，只是被隔离起来。
+
+bufferization::bufferizeOp
+这个 API 和 One-Shot 最大区别是：
+它不做 analysis。
+One-Shot 的核心价值其实是：
+alias analysis + inplace decision
+而 bufferizeOp 不分析，直接采用最保守策略：
+写之前先 copy
+相当于：AlwaysCopyAnalysisState
+因此简单，但性能很差。
+
+One-Shot Bufferize can be configured to bufferize only ops from a set of dialects with dialect-filter
+pass只对dialect-filter里的dialect的op进行bufferization
+
+函数间的bufferization暂时没有实现,复杂度太高
+
+## Memory  layouts
+%0 = "my_dialect.unbufferizable_op"(%t)
+     : (tensor<?x?xf32>) -> tensor<?x?xf32>
+
+%1 = tensor.extract %0[%i, %j]
+
+这里 tensor.extract 是可以 bufferize 的，但 my_dialect.unbufferizable_op 不会 bufferize，因为它没有实现 BufferizableOpInterface。如果开启了 allow-unknown-ops，One-Shot 不会直接报错，而是会在边界插一个：
+%0_m = bufferization.to_buffer %0
+
+问题就来了：%0_m 的 memref type 应该是什么？
+
+tensor type 只有 shape 和 element type
+memref type 还包含 layout 信息，例如 stride、offset、是否 contiguous
+但 One-Shot 现在根本不知道 unbufferizable_op 未来会如何 lower。它以后可能会变成：
+contiguous buffer
+subview
+transpose
+tiled layout
+带动态 stride 的 view
+因此如果现在贸然假设 identity layout，未来真正 bufferize 这个 op 时，可能会发现 layout 根本不匹配。
+所以默认策略是最保守的：
+memref<?x?xf32, strided<[?, ?], offset: ?>>
+即 fully dynamic layout
+另一个选项：
+
+identity-layout-map
+
+会强行生成：
+memref<?x?xf32>
+这种传统连续布局。
+这对很多老 backend 更友好，因为它们不支持复杂 memref layout。
+
+但缺点是：如果未来真实 layout 不是 identity，那么可能需要插额外的 memref.cast 甚至 buffer copy。
+
+identity layout 指的是：
+
+逻辑索引
+直接按默认连续内存布局
+映射到物理地址
+没有：
+transpose、padding、tiling、subview、非连续 stride 等额外映射。
+有些bufferizable的op可能也无法buffer,如
+tensor.cast tensor<*xf32>
+         to tensor<?x?xf32>
+因为无法知道stride/offset/contigious,不能保证真实layout,采用 
+fully dynamic layout
+就是说,在无法bufferization时,可以采用
+fully dynamic layout或identity layout 
+
+## 支持 One-Shot Bufferize
+Users must at least implement the following interface methods
+bufferizesToMemoryRead: Return true if the buffer of the given tensor OpOperand is read.
+bufferizesToMemoryWrite: Return true if the buffer of the given tensor OpOperand is written (if bufferizing in-place).
+getAliasingOpResult: Return the OpResults that may share the same buffer as the given OpOperand. This interface method describes to OpOperand-to-OpResult mapping wrt. destination-passing style.
+bufferRelation: Return BufferRelation::Equivalent if the given OpResult is the exact same memref as the aliasing OpOperand after bufferization (in case of in-place bufferization). Otherwise, (e.g., they overlap but are not necessarily the exact same memrefs), BufferRelation::Unknown should be returned. Additional buffer relations will be added in the future, but BufferRelation::Unknown is always safe.
+描述opresult和alias operand的alias程度,完全相同,返回BufferRelation::Equivalent，如果只是overlap,如slice/view/subview,返回Unknown“它们可能共享内存，但关系不够精确”
+bufferize: Rewrite the op with the given rewriter. Ops should be replaced with bufferization::replaceOpWithBufferizedValues
+当已经有DestinationStyleOpInterface时,可以从DstBufferizableOpInterfaceExternalModel直接继承,只需要实现bufferize方法。
+
+func.func @test(%arg0: f32, %arg1: f32, %arg2: index, %arg3: index) -> (f32, tensor<3xf32>) {
+  // Create a new tensor with [%arg0, %arg0, %arg0].
+  %0 = tensor.from_elements %arg0, %arg0, %arg0 : tensor<3xf32>
+
+  // Insert something into the new tensor.
+  %1 = tensor.insert %arg1 into %0[%arg2] : tensor<3xf32>
+
+  // Read from the old tensor.
+  %r = tensor.extract %0[%arg3] : tensor<3xf32>
+
+  // Return the extracted value and the result of the insertion.
+  func.return %r, %1 : f32, tensor<3xf32>
+}
+
+func.func @test(%arg0: f32, %arg1: f32, %arg2: index, %arg3: index) -> (f32, tensor<3xf32>) {
+  %from_elements = tensor.from_elements %arg0, %arg0, %arg0 {"C_0[DEF: result 0]"} : tensor<3xf32>
+  %inserted = tensor.insert %arg1 into %from_elements[%arg2] {"C_0[CONFL-WRITE: 1]", __inplace_operands_attr__ = ["none", "false", "none"]} : tensor<3xf32>
+  %extracted = tensor.extract %from_elements[%arg3] {"C_0[READ: 0]", __inplace_operands_attr__ = ["true", "none"]} : tensor<3xf32>
+  return {__inplace_operands_attr__ = ["none", "true"]} %extracted, %inserted : f32, tensor<3xf32>
+}
+
+Every operation with tensor semantics has a __inplace_operands_attr__ attribute with one value per operand. If an operand is not a tensor, the respective value is none. Otherwise, if the operand was decided to be bufferized in-place, the value is true. A value of false indicates a buffer copy. In the above example, a buffer copy would be inserted for tensor.insert, so that it does not overwrite buffer(%from_elements), which is still needed for tensor.extract
+如果一个op的operand不是tensor,那么它__inplace_operands_attr__对应的下标处为none,如果是in-place,为true,不是的话,为false
+
+For each RaW (there is only one in the example), three C_i attributes were added:
+
+C_0[DEF: result 0]: A tensor is defined: 0-th result of tensor.from_elements.
+C_0[CONFL-WRITE: 1]: An operation (if bufferized in-place) would write into the future buffer of the defined tensor: 1-st operand of tensor.insert.
+C_0[READ: 0]: An operation reads the tensor definition: 0-th operand of tensor.extract.
+
+func.func @test(%arg0: f32, %arg1: f32, %arg2: index, %arg3: index) -> (f32, memref<3xf32>) {
+  %c2 = arith.constant 2 : index
+  %c1 = arith.constant 1 : index
+  %c0 = arith.constant 0 : index
+  %alloc = memref.alloc() {alignment = 64 : i64} : memref<3xf32>
+  memref.store %arg0, %alloc[%c0] : memref<3xf32>
+  memref.store %arg0, %alloc[%c1] : memref<3xf32>
+  memref.store %arg0, %alloc[%c2] : memref<3xf32>
+  %alloc_0 = memref.alloc() {alignment = 64 : i64} : memref<3xf32>
+  memref.copy %alloc, %alloc_0 : memref<3xf32> to memref<3xf32>
+  memref.store %arg1, %alloc_0[%arg2] : memref<3xf32>
+  %0 = memref.load %alloc[%arg3] : memref<3xf32>
+  return %0, %alloc_0 : f32, memref<3xf32>
+}
+
+# Data Layout Modeling
+mlir中,data layout是以attribute的形式添加到op上的,一般是module op
+Data Layout 的核心作用是回答：
+“某个 type 在内存里到底长什么样”
+因为 IR 里的 type：
+i32
+vector<4xf32>
+memref<...>
+tensor<...>
+是抽象类型,而具体的
+size
+alignment
+offset
+stride
+vector packing
+pointer width
+必须知道它们才能落实到真实内存里
+LLVM 的 type system 基本封闭：
+
+i32
+struct
+pointer
+vector
+但在mlir中,因为支持type的拓展interface-driven extensible system
+1. attribute interfaces
+#dlti.dl_spec<...>里面描述：
+alignment
+pointer size
+ABI info
+2. type interfaces
+在type中描述
+alignment
+pointer size
+ABI info
+3. operation interfaces 
+在op中描述
+alignment
+pointer size
+ABI info
+data layout scope module op
+4. dialect interfaces
+为整个dialect给出layout描述
+
+## scope
+对于含有region的OP,它会给region中其他的op赋一个默认的layout描述,前提要实现
+DataLayoutOpInterface or ModuleOp。
+在region或嵌套的op中,可以自己拓展/覆盖/修改默认的layout,但是必须inner必须兼容outer
+DataLayout 查询很贵，
+所以 MLIR 做了 cache
+找当前 scope
+往外层 scope 查 layout spec
+merge 多层 layout
+查 dialect interface
+查 type interface
+解析 alignment/layout rule
+计算 vector/container layout
+
+# pattern rewriter
+restriction
+1. benefit 根据benefit选择匹配对象
+2. restriction,所有的ir mutation,必须通过patternRewriter
+3. root operation 要么修改/删除/就地更新
+
+递归处理,一个pattern 有可能rewriter成自己还可以match的情况,检测到这种情况,不允许跑,除非
+pattern显式声明setHasBoundedRewriteRecursion();
+RewritePattern
+    ↓
+描述 rewrite 规则
+
+RewritePatternSet
+    ↓
+收集 patterns
+
+PatternApplicator
+    ↓
+pattern dispatch + cost model
+
+PatternRewriter
+    ↓
+安全 IR mutation
+
+PatternDriver
+    ↓
+控制 rewrite 流程/fixpoint/worklist
