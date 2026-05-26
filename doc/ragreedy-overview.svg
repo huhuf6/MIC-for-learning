@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1680" viewBox="0 0 2400 1680" role="img" aria-labelledby="title desc">
+  <title id="title">LLVM Greedy Register Allocation 主路线时序图</title>
+  <desc id="desc">展示 LLVM 优化路径下 greedy register allocation 从预处理、live interval 计算、coalescing、调度、分配、重写到 PEI 落地的主链路。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#183153"/>
+    </marker>
+    <marker id="retArrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title { font: 700 34px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; }
+      .subtitle { font: 500 18px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #486581; }
+      .lane-title { font: 700 21px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; }
+      .lane-sub { font: 500 15px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #486581; }
+      .msg { font: 600 18px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; }
+      .small { font: 500 15px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #486581; }
+      .note { font: 500 17px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #243b53; }
+      .mono { font: 600 17px "SFMono-Regular", Consolas, monospace; fill: #102a43; }
+      .header { fill: #e0f2fe; stroke: #7dd3fc; stroke-width: 2.5; rx: 18; }
+      .life { stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 10 10; }
+      .arrow { stroke: #183153; stroke-width: 3.2; fill: none; marker-end: url(#arrow); }
+      .ret { stroke: #64748b; stroke-width: 2.3; stroke-dasharray: 8 8; fill: none; marker-end: url(#retArrow); }
+      .group1 { fill: #f0fdf4; stroke: #4ade80; stroke-width: 2.5; rx: 18; }
+      .group2 { fill: #eff6ff; stroke: #60a5fa; stroke-width: 2.5; rx: 18; }
+      .group3 { fill: #fff7ed; stroke: #fb923c; stroke-width: 2.5; rx: 18; }
+      .group4 { fill: #fef2f2; stroke: #f87171; stroke-width: 2.5; rx: 18; }
+      .legend { fill: #eef2ff; stroke: #818cf8; stroke-width: 2.5; rx: 18; }
+      .box { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 2; rx: 18; }
+    </style>
+  </defs>
+
+  <rect width="2400" height="1680" fill="#ffffff"/>
+  <rect x="40" y="40" width="2320" height="1600" fill="#f8fbff" stroke="#d9e2ec" stroke-width="2" rx="28"/>
+
+  <text x="80" y="100" class="title">LLVM Greedy Register Allocation 主路线时序图</text>
+  <text x="80" y="135" class="subtitle">优化路径下默认链路: 预处理 -&gt; LiveIntervals -&gt; Coalescer -&gt; PreRA Scheduler -&gt; RAGreedy -&gt; VirtRegRewriter -&gt; PEI</text>
+  <text x="80" y="165" class="subtitle">重点看清三个层次: pass 编排、greedy 分配、target 落地</text>
+
+  <rect x="70" y="220" width="250" height="95" class="header"/>
+  <rect x="390" y="220" width="250" height="95" class="header"/>
+  <rect x="710" y="220" width="250" height="95" class="header"/>
+  <rect x="1030" y="220" width="250" height="95" class="header"/>
+  <rect x="1350" y="220" width="250" height="95" class="header"/>
+  <rect x="1670" y="220" width="250" height="95" class="header"/>
+  <rect x="1990" y="220" width="250" height="95" class="header"/>
+
+  <text x="128" y="255" class="lane-title">TargetPassConfig</text>
+  <text x="124" y="285" class="lane-sub">编排整个优化路径</text>
+
+  <text x="460" y="255" class="lane-title">RISCVPassConfig</text>
+  <text x="450" y="285" class="lane-sub">目标相关 PreRA 钩子</text>
+
+  <text x="777" y="255" class="lane-title">LiveIntervals</text>
+  <text x="750" y="285" class="lane-sub">构建 live interval</text>
+
+  <text x="1075" y="255" class="lane-title">Coalescer / Sched</text>
+  <text x="1082" y="285" class="lane-sub">减 copy / 调度</text>
+
+  <text x="1425" y="255" class="lane-title">RAGreedy</text>
+  <text x="1398" y="285" class="lane-sub">真正做寄存器分配</text>
+
+  <text x="1722" y="255" class="lane-title">VirtRegRewriter</text>
+  <text x="1742" y="285" class="lane-sub">vreg 改写为 physreg</text>
+
+  <text x="2065" y="255" class="lane-title">PEI / RISCV</text>
+  <text x="2040" y="285" class="lane-sub">栈帧与 frame index 落地</text>
+
+  <line x1="195" y1="320" x2="195" y2="1510" class="life"/>
+  <line x1="515" y1="320" x2="515" y2="1510" class="life"/>
+  <line x1="835" y1="320" x2="835" y2="1510" class="life"/>
+  <line x1="1155" y1="320" x2="1155" y2="1510" class="life"/>
+  <line x1="1475" y1="320" x2="1475" y2="1510" class="life"/>
+  <line x1="1795" y1="320" x2="1795" y2="1510" class="life"/>
+  <line x1="2115" y1="320" x2="2115" y2="1510" class="life"/>
+
+  <rect x="120" y="360" width="2140" height="180" class="group1"/>
+  <text x="145" y="395" class="msg">阶段 1. 进入 optimized regalloc 路径</text>
+  <text x="145" y="425" class="note">`TargetPassConfig::addOptimizedRegAlloc()` 固定了 greedy 主路线的前半段 pass 顺序。</text>
+
+  <line x1="195" y1="470" x2="515" y2="470" class="arrow"/>
+  <text x="255" y="455" class="msg">1. `addPreRegAlloc()`</text>
+
+  <line x1="515" y1="515" x2="195" y2="515" class="ret"/>
+  <text x="205" y="505" class="small">插入 RISC-V 预处理: expand pseudo / insert VSETVLI / insert CSR ops</text>
+
+  <rect x="1500" y="390" width="700" height="105" class="box"/>
+  <text x="1525" y="425" class="note">这里还是 Machine SSA 附近阶段，主要把 target 约束显式化，</text>
+  <text x="1525" y="455" class="note">为后面的 live interval 和 greedy 分配做准备。</text>
+
+  <rect x="120" y="585" width="2140" height="220" class="group2"/>
+  <text x="145" y="620" class="msg">阶段 2. 建立分配问题本身</text>
+  <text x="145" y="650" class="note">先把“值什么时候活着”算清楚，再尽量把 COPY 合并掉，最后做一次 pre-RA 调度。</text>
+
+  <line x1="195" y1="700" x2="835" y2="700" class="arrow"/>
+  <text x="375" y="685" class="msg">2. 运行 `LiveIntervals::runOnMachineFunction()`</text>
+
+  <line x1="835" y1="735" x2="195" y2="735" class="ret"/>
+  <text x="330" y="762" class="small">产出: 每个 vreg 的 live interval、regmask 信息、block live-in 信息</text>
+
+  <line x1="195" y1="785" x2="1155" y2="785" class="arrow"/>
+  <text x="515" y="770" class="msg">3. `RegisterCoalescer` + `MachineScheduler`</text>
+
+  <line x1="1155" y1="820" x2="195" y2="820" class="ret"/>
+  <text x="505" y="847" class="small">减少 COPY，改善局部调度质量，给 greedy 更干净的输入</text>
+
+  <rect x="1530" y="655" width="670" height="105" class="box"/>
+  <text x="1555" y="690" class="note">这一步之后，问题已经从“抽象 SSA 值”</text>
+  <text x="1555" y="720" class="note">变成“带 live interval 的机器级寄存器分配问题”。</text>
+
+  <rect x="120" y="860" width="2140" height="300" class="group3"/>
+  <text x="145" y="895" class="msg">阶段 3. RAGreedy 真正分配物理寄存器</text>
+  <text x="145" y="925" class="note">核心循环来自 `RegAllocBase::allocatePhysRegs()`：每次从优先队列取一个 live interval，交给 `selectOrSplit()` 决策。</text>
+
+  <line x1="195" y1="980" x2="1475" y2="980" class="arrow"/>
+  <text x="620" y="965" class="msg">4. `createGreedyRegisterAllocator()` -&gt; `RAGreedy::runOnMachineFunction()`</text>
+
+  <line x1="1475" y1="1015" x2="195" y2="1015" class="ret"/>
+  <text x="585" y="1042" class="small">初始化 priority queue、VirtRegMap、LiveRegMatrix、spill heuristics</text>
+
+  <line x1="1475" y1="1070" x2="1475" y2="1135" class="arrow"/>
+  <text x="1510" y="1060" class="msg">5. 对每个 interval 调 `selectOrSplit()`</text>
+  <text x="1510" y="1090" class="small">先尝试直接分配，再 evict，再 split，最后 spill</text>
+  <text x="1510" y="1120" class="small">更细的函数级逻辑见下方 `selectOrSplit` 细图</text>
+
+  <rect x="220" y="1045" width="1020" height="95" class="box"/>
+  <text x="245" y="1080" class="mono">直接分配成功 -&gt; 记录 `VirtReg -&gt; PhysReg`</text>
+  <text x="245" y="1110" class="mono">分配失败 -&gt; 可能驱逐别的 interval、切分 live range、或插入 spill/reload</text>
+
+  <rect x="120" y="1215" width="2140" height="260" class="group4"/>
+  <text x="145" y="1250" class="msg">阶段 4. 分配结果落地成真实机器代码</text>
+  <text x="145" y="1280" class="note">分配器只决定“哪个 vreg 用哪个 physreg / 哪些值进栈槽”；真正把这些决定改写进 MachineInstr 和栈帧的是后两步。</text>
+
+  <line x1="195" y1="1335" x2="1795" y2="1335" class="arrow"/>
+  <text x="760" y="1320" class="msg">6. `VirtRegRewriter` 把所有 vreg 改写成 physreg</text>
+
+  <line x1="1795" y1="1370" x2="195" y2="1370" class="ret"/>
+  <text x="600" y="1397" class="small">补 live-in / kill / dead，删 identity copy，MachineInstr 不再依赖虚拟寄存器</text>
+
+  <line x1="195" y1="1440" x2="2115" y2="1440" class="arrow"/>
+  <text x="890" y="1425" class="msg">7. `PrologEpilogInserter` + `RISCVFrameLowering/RISCVRegisterInfo`</text>
+
+  <line x1="2115" y1="1475" x2="195" y2="1475" class="ret"/>
+  <text x="720" y="1502" class="small">决定 callee-saved spill/restore，生成 prologue/epilogue，把 `FrameIndex` 变成 `sp/fp/bp + offset`</text>
+
+  <rect x="80" y="1540" width="900" height="75" class="legend"/>
+  <text x="105" y="1570" class="msg">一句话总结</text>
+  <text x="105" y="1598" class="mono">greedy 路线 = 先建 live interval，再减 copy，再分配，再把决定重写进指令和栈帧</text>
+
+  <rect x="1030" y="1540" width="560" height="75" class="legend"/>
+  <text x="1055" y="1570" class="msg">算法重心</text>
+  <text x="1055" y="1598" class="mono">priority queue + spill weight + split + eviction</text>
+
+  <rect x="1640" y="1540" width="620" height="75" class="legend"/>
+  <text x="1665" y="1570" class="msg">target 重心</text>
+  <text x="1665" y="1598" class="mono">reserved regs / callee-saved / frame index elimination</text>
+</svg>

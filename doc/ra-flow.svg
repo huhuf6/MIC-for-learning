@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1100" viewBox="0 0 1800 1100" role="img" aria-labelledby="title desc">
+  <title id="title">LLVM RA 阶段流程图</title>
+  <desc id="desc">展示 LLVM greedy register allocator 的核心寄存器分配逻辑。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#17324d"/>
+    </marker>
+    <style>
+      .title { font: 700 34px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; }
+      .subtitle { font: 500 18px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #486581; }
+      .h { font: 700 22px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; }
+      .t { font: 500 17px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #243b53; }
+      .mono { font: 600 16px Consolas, monospace; fill: #102a43; }
+      .box1 { fill: #eff6ff; stroke: #60a5fa; stroke-width: 2.5; rx: 18; }
+      .box2 { fill: #f0fdf4; stroke: #4ade80; stroke-width: 2.5; rx: 18; }
+      .box3 { fill: #fff7ed; stroke: #fb923c; stroke-width: 2.5; rx: 18; }
+      .box4 { fill: #fef2f2; stroke: #f87171; stroke-width: 2.5; rx: 18; }
+      .note { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 2; rx: 16; }
+      .arrow { stroke: #17324d; stroke-width: 3.2; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1100" fill="#ffffff"/>
+  <rect x="28" y="28" width="1744" height="1044" fill="#f8fbff" stroke="#d9e2ec" stroke-width="2" rx="26"/>
+
+  <text x="70" y="90" class="title">LLVM RA 阶段流程图</text>
+  <text x="70" y="125" class="subtitle">目标: 真正决定每个 virtual register 去哪个 physical register，或者 spill 到哪里</text>
+
+  <rect x="80" y="180" width="320" height="120" class="box1"/>
+  <text x="115" y="223" class="h">输入</text>
+  <text x="115" y="255" class="t">live intervals</text>
+  <text x="115" y="282" class="t">allocation order / hints / matrix</text>
+
+  <line x1="400" y1="240" x2="530" y2="240" class="arrow"/>
+
+  <rect x="530" y="150" width="360" height="180" class="box2"/>
+  <text x="560" y="192" class="h">RegAllocBase</text>
+  <text x="560" y="228" class="t">`seedLiveRegs()`</text>
+  <text x="560" y="258" class="t">`allocatePhysRegs()`</text>
+  <text x="560" y="288" class="t">从优先队列逐个取 interval</text>
+
+  <line x1="890" y1="240" x2="1020" y2="240" class="arrow"/>
+
+  <rect x="1020" y="150" width="390" height="180" class="box3"/>
+  <text x="1050" y="192" class="h">RAGreedy::selectOrSplit</text>
+  <text x="1050" y="228" class="t">`tryAssign`</text>
+  <text x="1050" y="258" class="t">`tryEvict` / `trySplit`</text>
+  <text x="1050" y="288" class="t">`spill` / recolor</text>
+
+  <line x1="1410" y1="240" x2="1540" y2="240" class="arrow"/>
+
+  <rect x="1540" y="150" width="180" height="180" class="box4"/>
+  <text x="1577" y="192" class="h">输出</text>
+  <text x="1567" y="228" class="t">VirtRegMap</text>
+  <text x="1567" y="258" class="t">分配结果</text>
+
+  <rect x="90" y="395" width="1620" height="240" class="note"/>
+  <text x="120" y="440" class="h">`selectOrSplit` 的核心决策树</text>
+  <text x="120" y="480" class="t">1. 先试能不能直接找到空闲 physreg。</text>
+  <text x="120" y="515" class="t">2. 直接分不了，就试着驱逐价值更低的 interval。</text>
+  <text x="120" y="550" class="t">3. 第一次失败通常先不急着 spill，而是重新入队，等第二轮再看更完整的干扰图。</text>
+  <text x="120" y="585" class="t">4. 第二轮再失败，就真正做 split；还不行才 spill。</text>
+
+  <line x1="300" y1="710" x2="300" y2="790" class="arrow"/>
+  <line x1="700" y1="710" x2="700" y2="790" class="arrow"/>
+  <line x1="1100" y1="710" x2="1100" y2="790" class="arrow"/>
+  <line x1="1500" y1="710" x2="1500" y2="790" class="arrow"/>
+
+  <rect x="80" y="790" width="320" height="200" class="box1"/>
+  <text x="110" y="835" class="h">可直接分配</text>
+  <text x="110" y="870" class="t">`LiveRegMatrix::checkInterference`</text>
+  <text x="110" y="900" class="t">若空闲，直接 `assign`</text>
+  <text x="110" y="930" class="t">最便宜、最希望出现</text>
+
+  <rect x="490" y="790" width="420" height="200" class="box2"/>
+  <text x="520" y="835" class="h">可通过驱逐解决</text>
+  <text x="520" y="870" class="t">`tryEvict` 评估是否把更不重要的 interval 挪走</text>
+  <text x="520" y="905" class="t">成功就腾出 physreg 给当前值</text>
+
+  <rect x="980" y="790" width="360" height="200" class="box3"/>
+  <text x="1010" y="835" class="h">需要 split</text>
+  <text x="1010" y="870" class="t">把长 live range 切成更小片段</text>
+  <text x="1010" y="900" class="t">重新生成 interval 再入队</text>
+  <text x="1010" y="930" class="t">现代 greedy 的关键能力</text>
+
+  <rect x="1410" y="790" width="310" height="200" class="box4"/>
+  <text x="1440" y="835" class="h">最终 spill</text>
+  <text x="1440" y="870" class="t">插入 spill/reload</text>
+  <text x="1440" y="900" class="t">值暂时去栈槽</text>
+  <text x="1440" y="930" class="t">代价最高</text>
+
+  <rect x="80" y="1015" width="1640" height="48" class="note"/>
+  <text x="110" y="1047" class="mono">一句话: RA = 以 live interval 为单位，不断做 assign / evict / split / spill，直到所有值都有归宿</text>
+</svg>
