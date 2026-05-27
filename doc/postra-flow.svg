@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1080" viewBox="0 0 1800 1080" role="img" aria-labelledby="title desc">
+  <title id="title">LLVM post-RA 阶段流程图</title>
+  <desc id="desc">展示 LLVM 在寄存器分配完成之后如何把结果重写进机器指令、栈帧并继续做后续优化。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#17324d"/>
+    </marker>
+    <style>
+      .title { font: 700 34px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; }
+      .subtitle { font: 500 18px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #486581; }
+      .h { font: 700 22px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; }
+      .t { font: 500 17px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #243b53; }
+      .mono { font: 600 16px Consolas, monospace; fill: #102a43; }
+      .box1 { fill: #eff6ff; stroke: #60a5fa; stroke-width: 2.5; rx: 18; }
+      .box2 { fill: #f0fdf4; stroke: #4ade80; stroke-width: 2.5; rx: 18; }
+      .box3 { fill: #fff7ed; stroke: #fb923c; stroke-width: 2.5; rx: 18; }
+      .box4 { fill: #fef2f2; stroke: #f87171; stroke-width: 2.5; rx: 18; }
+      .note { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 2; rx: 16; }
+      .arrow { stroke: #17324d; stroke-width: 3.2; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1080" fill="#ffffff"/>
+  <rect x="28" y="28" width="1744" height="1024" fill="#f8fbff" stroke="#d9e2ec" stroke-width="2" rx="26"/>
+
+  <text x="70" y="90" class="title">LLVM post-RA 阶段流程图</text>
+  <text x="70" y="125" class="subtitle">目标: 把“已经分好的寄存器”真正改写进指令和栈帧，并做 RA 之后还能做的机器级优化</text>
+
+  <rect x="80" y="180" width="300" height="120" class="box1"/>
+  <text x="110" y="223" class="h">输入</text>
+  <text x="110" y="255" class="t">RA 已完成</text>
+  <text x="110" y="282" class="t">VirtRegMap / spill slot 已确定</text>
+
+  <line x1="380" y1="240" x2="520" y2="240" class="arrow"/>
+
+  <rect x="520" y="150" width="360" height="180" class="box2"/>
+  <text x="550" y="192" class="h">VirtRegRewriter</text>
+  <text x="550" y="228" class="t">把 vreg 改写成 physreg</text>
+  <text x="550" y="258" class="t">补 kill / dead / live-in</text>
+  <text x="550" y="288" class="t">删 identity copy</text>
+
+  <line x1="880" y1="240" x2="1020" y2="240" class="arrow"/>
+
+  <rect x="1020" y="150" width="360" height="180" class="box3"/>
+  <text x="1050" y="192" class="h">post-RA machine opts</text>
+  <text x="1050" y="228" class="t">`StackSlotColoring`</text>
+  <text x="1050" y="258" class="t">`MachineCopyPropagation`</text>
+  <text x="1050" y="288" class="t">`MachineLICM` / sinking / shrink-wrap</text>
+
+  <line x1="1380" y1="240" x2="1520" y2="240" class="arrow"/>
+
+  <rect x="1520" y="150" width="200" height="180" class="box4"/>
+  <text x="1565" y="192" class="h">PEI</text>
+  <text x="1565" y="228" class="t">栈帧落地</text>
+  <text x="1565" y="258" class="t">frame index 消除</text>
+
+  <rect x="100" y="400" width="1620" height="215" class="note"/>
+  <text x="130" y="445" class="h">为什么 post-RA 还要有一大段流程？</text>
+  <text x="130" y="485" class="t">因为 RA 结束时，你拿到的还只是“分配决策”，不是最终汇编。</text>
+  <text x="130" y="520" class="t">例如: 某个值被 spill 到哪个栈槽、某条指令该用哪个 physreg，这些都还需要被真正改写进 MachineInstr。</text>
+  <text x="130" y="555" class="t">而且只有在寄存器真正落定之后，像 copy-prop、stack slot 合并、shrink-wrap 这些优化才更准确。</text>
+
+  <line x1="280" y1="685" x2="280" y2="770" class="arrow"/>
+  <line x1="745" y1="685" x2="745" y2="770" class="arrow"/>
+  <line x1="1210" y1="685" x2="1210" y2="770" class="arrow"/>
+  <line x1="1600" y1="685" x2="1600" y2="770" class="arrow"/>
+
+  <rect x="80" y="770" width="400" height="190" class="box1"/>
+  <text x="110" y="815" class="h">rewrite 后</text>
+  <text x="110" y="850" class="t">MIR 基本不再依赖 vreg</text>
+  <text x="110" y="880" class="t">指令开始接近最终机器代码</text>
+
+  <rect x="545" y="770" width="400" height="190" class="box2"/>
+  <text x="575" y="815" class="h">target post-RA pass</text>
+  <text x="575" y="850" class="t">RISC-V 例如可以做 redundant copy elimination</text>
+  <text x="575" y="880" class="t">只处理已经落定的 physreg 代码</text>
+
+  <rect x="1010" y="770" width="400" height="190" class="box3"/>
+  <text x="1040" y="815" class="h">PEI + FrameLowering</text>
+  <text x="1040" y="850" class="t">计算 callee-saved 保存恢复</text>
+  <text x="1040" y="880" class="t">生成 prologue / epilogue</text>
+  <text x="1040" y="910" class="t">`eliminateFrameIndex()`</text>
+
+  <rect x="1475" y="770" width="245" height="190" class="box4"/>
+  <text x="1505" y="815" class="h">输出</text>
+  <text x="1505" y="850" class="t">更接近最终汇编的 MIR</text>
+  <text x="1505" y="880" class="t">准备 post-RA 调度 / 发射</text>
+
+  <rect x="80" y="985" width="1640" height="48" class="note"/>
+  <text x="110" y="1017" class="mono">一句话: post-RA = 把分配结果真正写进机器指令和栈帧，再做最后一轮机器级收尾优化</text>
+</svg>

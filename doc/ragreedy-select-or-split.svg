@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1850" viewBox="0 0 2400 1850" role="img" aria-labelledby="title desc">
+  <title id="title">LLVM RAGreedy::selectOrSplit 详细调用时序图</title>
+  <desc id="desc">展示 selectOrSplit 从 tryAssign、tryEvict、trySplit 到 spill 的核心调用路径。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#213547"/>
+    </marker>
+    <marker id="returnArrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title { font: 700 34px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #12263a; }
+      .subtitle { font: 500 18px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #355070; }
+      .lane-title { font: 700 22px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; }
+      .lane-sub { font: 500 15px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #486581; }
+      .msg { font: 600 18px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; }
+      .small { font: 500 15px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #486581; }
+      .note { font: 500 17px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #243b53; }
+      .mono { font: 600 17px "SFMono-Regular", Consolas, monospace; fill: #102a43; }
+      .arrow { stroke: #213547; stroke-width: 3.2; fill: none; marker-end: url(#arrow); }
+      .ret { stroke: #64748b; stroke-width: 2.4; stroke-dasharray: 8 8; fill: none; marker-end: url(#returnArrow); }
+      .life { stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 10 10; }
+      .box { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 2; rx: 20; }
+      .header { fill: #dbeafe; stroke: #93c5fd; stroke-width: 2.5; rx: 20; }
+      .alt { fill: #fefce8; stroke: #facc15; stroke-width: 2.5; rx: 18; }
+      .alt2 { fill: #eff6ff; stroke: #60a5fa; stroke-width: 2.5; rx: 18; }
+      .alt3 { fill: #f0fdf4; stroke: #4ade80; stroke-width: 2.5; rx: 18; }
+      .alt4 { fill: #fef2f2; stroke: #f87171; stroke-width: 2.5; rx: 18; }
+      .legend { fill: #eef2ff; stroke: #818cf8; stroke-width: 2.5; rx: 18; }
+    </style>
+  </defs>
+
+  <rect width="2400" height="1850" fill="#ffffff"/>
+  <rect x="40" y="40" width="2320" height="1770" fill="#f8fbff" stroke="#d9e2ec" stroke-width="2" rx="28"/>
+
+  <text x="80" y="100" class="title">LLVM `RAGreedy::selectOrSplit` 详细调用时序图</text>
+  <text x="80" y="135" class="subtitle">只保留核心分配决策: `tryAssign -> tryEvict -> second round -> trySplit -> recolor/spill`</text>
+  <text x="80" y="165" class="subtitle">源码主入口: `RegAllocBase::allocatePhysRegs()` -> `RAGreedy::selectOrSplit()` -> `selectOrSplitImpl()`</text>
+
+  <rect x="90" y="220" width="280" height="95" class="header"/>
+  <rect x="470" y="220" width="280" height="95" class="header"/>
+  <rect x="850" y="220" width="280" height="95" class="header"/>
+  <rect x="1230" y="220" width="280" height="95" class="header"/>
+  <rect x="1610" y="220" width="280" height="95" class="header"/>
+  <rect x="1990" y="220" width="280" height="95" class="header"/>
+
+  <text x="165" y="255" class="lane-title">RegAllocBase</text>
+  <text x="118" y="285" class="lane-sub">`allocatePhysRegs()`</text>
+
+  <text x="553" y="255" class="lane-title">RAGreedy</text>
+  <text x="498" y="285" class="lane-sub">`selectOrSplitImpl()`</text>
+
+  <text x="919" y="255" class="lane-title">AllocationOrder</text>
+  <text x="923" y="285" class="lane-sub">候选物理寄存器顺序</text>
+
+  <text x="1310" y="255" class="lane-title">TRI / Advisor</text>
+  <text x="1267" y="285" class="lane-sub">hint / CSR cost / spillability</text>
+
+  <text x="1682" y="255" class="lane-title">LiveRegMatrix</text>
+  <text x="1673" y="285" class="lane-sub">冲突检测 / assign / unassign</text>
+
+  <text x="2081" y="255" class="lane-title">Spiller</text>
+  <text x="2069" y="285" class="lane-sub">`spiller().spill(LRE)`</text>
+
+  <line x1="230" y1="320" x2="230" y2="1660" class="life"/>
+  <line x1="610" y1="320" x2="610" y2="1660" class="life"/>
+  <line x1="990" y1="320" x2="990" y2="1660" class="life"/>
+  <line x1="1370" y1="320" x2="1370" y2="1660" class="life"/>
+  <line x1="1750" y1="320" x2="1750" y2="1660" class="life"/>
+  <line x1="2130" y1="320" x2="2130" y2="1660" class="life"/>
+
+  <line x1="230" y1="370" x2="610" y2="370" class="arrow"/>
+  <text x="315" y="355" class="msg">1. `selectOrSplit(VirtReg, NewVRegs)`</text>
+
+  <line x1="610" y1="430" x2="990" y2="430" class="arrow"/>
+  <text x="703" y="415" class="msg">2. `AllocationOrder::create(...)`</text>
+  <line x1="990" y1="460" x2="610" y2="460" class="ret"/>
+  <text x="722" y="487" class="small">返回可分配 physreg 顺序</text>
+
+  <rect x="520" y="515" width="1740" height="245" class="alt3"/>
+  <text x="545" y="548" class="msg">A. 首选路径: `tryAssign()`</text>
+  <text x="545" y="578" class="note">对候选物理寄存器按顺序尝试，内部会结合 hint、callee-saved 首次使用成本和冲突检测。</text>
+
+  <line x1="610" y1="620" x2="1370" y2="620" class="arrow"/>
+  <text x="780" y="605" class="msg">3. `tryAssign()` 读取 hint / CSR first-use 信息</text>
+
+  <line x1="610" y1="675" x2="1750" y2="675" class="arrow"/>
+  <text x="920" y="660" class="msg">4. 对每个候选 physreg: `checkInterference(VirtReg, PhysReg)`</text>
+
+  <line x1="1750" y1="710" x2="610" y2="710" class="ret"/>
+  <text x="1030" y="737" class="small">返回 `IK_Free` / `IK_RegMask` / `IK_RegUnit` / `IK_VirtReg`</text>
+
+  <line x1="610" y1="765" x2="1750" y2="765" class="arrow"/>
+  <text x="860" y="750" class="msg">5. 若发现空闲 physreg: `assign(VirtReg, PhysReg)`</text>
+  <line x1="1750" y1="800" x2="610" y2="800" class="ret"/>
+  <text x="880" y="827" class="small">记录 `VirtReg -> PhysReg` 并更新 matrix</text>
+
+  <rect x="1340" y="575" width="830" height="130" class="box"/>
+  <text x="1365" y="610" class="note">源码位置:</text>
+  <text x="1365" y="640" class="mono">tryAssign(): RegAllocGreedy.cpp:400</text>
+  <text x="1365" y="670" class="mono">checkInterference(): LiveRegMatrix.cpp:186</text>
+
+  <rect x="520" y="860" width="1740" height="250" class="alt2"/>
+  <text x="545" y="893" class="msg">B. 直接分配失败后: `tryEvict()`</text>
+  <text x="545" y="923" class="note">只有当当前 interval 还不是 `RS_Split` 阶段，才会尝试驱逐更“不值钱”的 live range。</text>
+
+  <line x1="610" y1="970" x2="1750" y2="970" class="arrow"/>
+  <text x="945" y="955" class="msg">6. `tryEvict(VirtReg, Order, ...)` 再次查询冲突并评估可驱逐对象</text>
+
+  <line x1="610" y1="1025" x2="1370" y2="1025" class="arrow"/>
+  <text x="760" y="1010" class="msg">7. 评估 eviction worth / broken hint / cascade</text>
+
+  <line x1="1750" y1="1060" x2="610" y2="1060" class="ret"/>
+  <text x="850" y="1087" class="small">若成功: 返回可用 physreg，调用方随后完成 assign</text>
+
+  <rect x="1410" y="930" width="780" height="120" class="box"/>
+  <text x="1435" y="965" class="note">源码位置:</text>
+  <text x="1435" y="995" class="mono">tryEvict(): RegAllocGreedy.cpp:580</text>
+  <text x="1435" y="1025" class="mono">selectOrSplitImpl(): 2413-2426</text>
+
+  <rect x="520" y="1160" width="1740" height="220" class="alt"/>
+  <text x="545" y="1193" class="msg">C. second round 机制: 第一次失败先不急着 split / spill</text>
+  <text x="545" y="1223" class="note">如果当前 stage 还小于 `RS_Split`，greedy 会先把它标记成 `RS_Split`，然后把同一个 vreg 重新入队。</text>
+
+  <line x1="610" y1="1270" x2="610" y2="1325" class="arrow"/>
+  <text x="650" y="1260" class="msg">8. `setStage(VirtReg, RS_Split)`</text>
+  <text x="650" y="1290" class="msg">9. `NewVRegs.push_back(VirtReg.reg())`</text>
+  <text x="650" y="1320" class="msg">10. `return 0`，等第二轮再看完整干扰图</text>
+
+  <rect x="1300" y="1210" width="890" height="110" class="box"/>
+  <text x="1325" y="1245" class="note">对应源码:</text>
+  <text x="1325" y="1275" class="mono">if (Stage &lt; RS_Split) { setStage(...); NewVRegs.push_back(...); return 0; }</text>
+
+  <rect x="520" y="1430" width="1740" height="270" class="alt4"/>
+  <text x="545" y="1463" class="msg">D. 第二轮仍失败: `trySplit()` / `tryLastChanceRecoloring()` / `spill()`</text>
+  <text x="545" y="1493" class="note">这里才进入真正的重活: 切 live interval、最后机会 recolor，或者把值溢出到栈上。</text>
+
+  <line x1="610" y1="1540" x2="1750" y2="1540" class="arrow"/>
+  <text x="980" y="1525" class="msg">11. `trySplit(VirtReg, Order, NewVRegs, ...)`</text>
+  <line x1="1750" y1="1575" x2="610" y2="1575" class="ret"/>
+  <text x="885" y="1602" class="small">若 split 成功: 返回 physreg 或产生新的 interval 重新入队</text>
+
+  <line x1="610" y1="1650" x2="1370" y2="1650" class="arrow"/>
+  <text x="790" y="1635" class="msg">12. 若 `Stage &gt;= RS_Done` 或不可 spill: `tryLastChanceRecoloring()`</text>
+
+  <line x1="610" y1="1715" x2="2130" y2="1715" class="arrow"/>
+  <text x="1035" y="1700" class="msg">13. 最终仍失败: `LiveRangeEdit LRE`; `spiller().spill(LRE)`</text>
+
+  <line x1="2130" y1="1750" x2="610" y2="1750" class="ret"/>
+  <text x="1035" y="1777" class="small">生成 spill/reload 相关新 interval，标记 `RS_Done`，本轮返回 0</text>
+
+  <rect x="80" y="1710" width="720" height="80" class="legend"/>
+  <text x="105" y="1745" class="msg">Stage 演进</text>
+  <text x="105" y="1773" class="mono">RS_New -&gt; RS_Split -&gt; RS_Split2 -&gt; RS_Spill / RS_Memory -&gt; RS_Done</text>
+
+  <rect x="830" y="1710" width="700" height="80" class="legend"/>
+  <text x="855" y="1745" class="msg">返回值语义</text>
+  <text x="855" y="1773" class="mono">返回 physreg = 本轮成功分配; 返回 0 = 需要重入队 / split / spill</text>
+
+  <rect x="1560" y="1710" width="700" height="80" class="legend"/>
+  <text x="1585" y="1745" class="msg">源码锚点</text>
+  <text x="1585" y="1773" class="mono">RegAllocGreedy.cpp:2377 `selectOrSplitImpl`</text>
+</svg>

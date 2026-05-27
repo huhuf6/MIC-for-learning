@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1080" viewBox="0 0 1800 1080" role="img" aria-labelledby="title desc">
+  <title id="title">LLVM pre-RA 阶段流程图</title>
+  <desc id="desc">展示 LLVM 在真正寄存器分配之前的 pre-RA 核心处理流程。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#17324d"/>
+    </marker>
+    <style>
+      .title { font: 700 34px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; }
+      .subtitle { font: 500 18px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #486581; }
+      .h { font: 700 22px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #102a43; }
+      .t { font: 500 17px "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #243b53; }
+      .mono { font: 600 16px Consolas, monospace; fill: #102a43; }
+      .box1 { fill: #eff6ff; stroke: #60a5fa; stroke-width: 2.5; rx: 18; }
+      .box2 { fill: #f0fdf4; stroke: #4ade80; stroke-width: 2.5; rx: 18; }
+      .box3 { fill: #fff7ed; stroke: #fb923c; stroke-width: 2.5; rx: 18; }
+      .box4 { fill: #fef2f2; stroke: #f87171; stroke-width: 2.5; rx: 18; }
+      .note { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 2; rx: 16; }
+      .arrow { stroke: #17324d; stroke-width: 3.2; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1080" fill="#ffffff"/>
+  <rect x="28" y="28" width="1744" height="1024" fill="#f8fbff" stroke="#d9e2ec" stroke-width="2" rx="26"/>
+
+  <text x="70" y="90" class="title">LLVM pre-RA 阶段流程图</text>
+  <text x="70" y="125" class="subtitle">目标: 在真正分配寄存器之前，把 Machine IR 整理成“更容易分、更正确分”的形态</text>
+
+  <rect x="80" y="180" width="250" height="120" class="box1"/>
+  <text x="120" y="222" class="h">输入</text>
+  <text x="102" y="255" class="t">Machine IR</text>
+  <text x="103" y="282" class="t">仍带 vreg / SSA 痕迹</text>
+
+  <line x1="330" y1="240" x2="450" y2="240" class="arrow"/>
+
+  <rect x="450" y="150" width="360" height="180" class="box2"/>
+  <text x="480" y="192" class="h">SSA 整理与约束显式化</text>
+  <text x="480" y="228" class="t">`LiveVariables`</text>
+  <text x="480" y="258" class="t">`PHIElimination`</text>
+  <text x="480" y="288" class="t">`TwoAddressInstructionPass`</text>
+
+  <line x1="810" y1="240" x2="930" y2="240" class="arrow"/>
+
+  <rect x="930" y="150" width="360" height="180" class="box3"/>
+  <text x="960" y="192" class="h">target-specific pre-RA</text>
+  <text x="960" y="228" class="t">RISC-V 示例:</text>
+  <text x="960" y="258" class="t">`RISCVPreRAExpandPseudo`</text>
+  <text x="960" y="288" class="t">`RISCVInsertVSETVLI` / CSR</text>
+
+  <line x1="1290" y1="240" x2="1410" y2="240" class="arrow"/>
+
+  <rect x="1410" y="150" width="300" height="180" class="box4"/>
+  <text x="1445" y="192" class="h">结果</text>
+  <text x="1445" y="228" class="t">机器级约束已展开</text>
+  <text x="1445" y="258" class="t">copy / tied-op 更明确</text>
+  <text x="1445" y="288" class="t">target 特性已进入 MIR</text>
+
+  <rect x="120" y="420" width="1540" height="215" class="note"/>
+  <text x="150" y="465" class="h">pre-RA 的核心不是“分配”，而是“整理问题”</text>
+  <text x="150" y="505" class="t">1. 把 SSA 中的 `PHI` 改写成真实 copy，后面才能谈物理寄存器传递。</text>
+  <text x="150" y="540" class="t">2. 把 two-address、特殊寄存器、target pseudo 这些约束提前摊开，避免 RA 时才发现“这个值其实不能随便放”。</text>
+  <text x="150" y="575" class="t">3. 让后续活跃性分析和冲突分析建立在更真实的 Machine IR 上。</text>
+
+  <line x1="270" y1="700" x2="270" y2="780" class="arrow"/>
+  <line x1="695" y1="700" x2="695" y2="780" class="arrow"/>
+  <line x1="1120" y1="700" x2="1120" y2="780" class="arrow"/>
+  <line x1="1545" y1="700" x2="1545" y2="780" class="arrow"/>
+
+  <rect x="80" y="780" width="380" height="180" class="box1"/>
+  <text x="110" y="822" class="h">LiveIntervals</text>
+  <text x="110" y="857" class="t">计算每个 vreg 的 live interval</text>
+  <text x="110" y="887" class="t">这是 greedy allocator 的输入基础</text>
+
+  <rect x="505" y="780" width="380" height="180" class="box2"/>
+  <text x="535" y="822" class="h">RegisterCoalescer</text>
+  <text x="535" y="857" class="t">尽量消掉 COPY</text>
+  <text x="535" y="887" class="t">减少后续 live range 干扰</text>
+
+  <rect x="930" y="780" width="380" height="180" class="box3"/>
+  <text x="960" y="822" class="h">MachineScheduler</text>
+  <text x="960" y="857" class="t">做一次 pre-RA 调度</text>
+  <text x="960" y="887" class="t">改善 ILP / 压力分布</text>
+
+  <rect x="1355" y="780" width="355" height="180" class="box4"/>
+  <text x="1385" y="822" class="h">交给 RA</text>
+  <text x="1385" y="857" class="t">此时问题已经变成</text>
+  <text x="1385" y="887" class="mono">live interval + interference</text>
+
+  <rect x="80" y="985" width="1630" height="48" class="note"/>
+  <text x="110" y="1017" class="mono">一句话: pre-RA = 先把 Machine IR 清洗并约束化，再把“寄存器分配问题”交给真正的 allocator</text>
+</svg>
