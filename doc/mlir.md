@@ -1058,3 +1058,75 @@ PatternRewriter
 PatternDriver
     ↓
 控制 rewrite 流程/fixpoint/worklist
+
+# target 自定义指令从mlir到后端
+custom dialect op
+→ LLVM dialect intrinsic op   llvm.call_intrinsic  表示调用了target相关的指令
+→ LLVM IR intrinsic   llvm.call_intrinsic @llvm.riscv.myins ,tablegen里需要定义
+→ SelectionDAG intrinsic node
+→ custom target SDNode
+→ MachineInstr
+→ target instruction
+
+# vector dialect
+在llvm中,vector是1D的 1D register pack ,如AVX 的FMA lane-wise SIMD  
+8 个 lane 并行做： d[i] = a[i]*b[i]+c[i] 是1维的
+
+在mlir中,是带 shape 的高层 SIMD tensor
+如 mma,tensor core matrix multiply accumulate ,做的是矩阵乘加 16x16x16 mma 4096 次 multiply-add 是3维的
+FMA:
+  lane-level
+
+MMA:
+  tile-level
+
+vector保留以下特性
+tile structure
+lane structure
+subgroup structure
+
+MLIR vector
+不是裸寄存器
+而是保留了矩阵/块结构的信息
+vector不是纯 lowering artifact
+仍然是 transformation-friendly IR
+vector.contract 表达矩阵乘语义
+编译器还能
+detect mma patterns 
+do vector fusion
+do vector canonicalization
+如果lower成
+llvm.fma
+llvm.extractelement
+丢失高层语义
+retargetable
+同一个 vector IR
+能 lower 到不同硬件
+vector 仍然有大量的pass,把高层ir lower 硬件friendly ir
+memory movement 和 register computation分离
+
+# tensor vector memref
+tensor
+vector
+memref
+分别代表：
+
+值语义的数据
+SIMD/寄存器数据
+内存中的数据
+
+tensor  → 高层数学对象 immutable 值语义
+vector  → 硬件向量对象 immutable register 寄存器语义
+memref  → 内存对象     mem内存语义 address stride layout alias alloc dealloc
+tile layout 
+affine map：
+(i,j) -> (i floordiv 8,
+          j floordiv 8,
+          i mod 8,
+          j mod 8)
+i floordiv 8 tile i
+j floordiv 8 tile j
+i mod 8   tile(i,j) 内 i坐标
+j mod 8   tile(i,j) 内 j坐标
+vector dialect是把高层语义(矩阵乘)而非scalar,标量乘映射到硬件指令,而非转换到
+llvm ir用scalar乘,再用模式匹配的方式映射到硬件指令
