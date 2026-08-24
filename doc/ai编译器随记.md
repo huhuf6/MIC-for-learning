@@ -127,3 +127,66 @@ BuildXlaOpsPass 将_XlacompiledKernel属性值为真的节点替换为_Xla_compi
 
 # XLA JIT 代码生成
 BuildXlaOpsPass 中 _XlaCompile OpKernel负责代码生成
+
+
+# 指令选择
+
+## selDAG
+通过vm字节码替换大量类似switch case 的指令选择,自动生成matchtable
+在selectioncode中调用,td文件中写pat/patfrag等规则
+
+## globalSel
+IRtranslator 将llvm ir -> gmir
+legalizer 将selDAG的合法化合并,提升或者降级/或者组合成多条指令
+regbankselect
+instructionSelect
+llvm的各个后端需要独立实现这4个pass
+
+## 候选指令匹配规则
+让具体模式优先于通用模式
+G_ADD x, 5 → 特殊立即数指令
+G_ADD x, y → 普通寄存器加法
+
+# 指令调度
+在块内或块间进行局部/全局调度
+最常见是拓扑排序,对于循环,要遍历到循环不动点,不动点就是所有活跃信息都已在控制流图中传播完毕，再计算一次也不会得到任何新信息的状态。
+
+## 关键路径优先调度算法
+关键路径是数据依赖图中节点的最长的路径，从就绪列表中选择指令的标准是最小化关键路径上的指令序列执行时间，减少流水线停顿的发生频率 在实际实现中，可以增加其他优先级策略，如寄存器压力 随着就绪列表中的指令不断被调度，数据依赖图中的其他节点相继被加入就绪列表，并重复上述过程 ，直到所有节点都被调度，数据依赖图为空时，调度过程结束。
+
+全局指令调度可以在基本块间重排指令，需要考虑的情况更为复杂，因而大部分编译器只实现局部指令调度
+
+# LLVM的调度器
+调度方向: 自底向上/自顶向下/双向
+
+## 指令选择阶段的调度器
+所有调度器的实现类都继承自 ScheduleDAG ScheduleDAG 类的两个子类分别是 ScheduleDAGSDNodes 类和 ScheduleDAGlnstrs,
+ScheduleDAGSDNodes是给指令选择阶段做调度的基类,调度对象是SDnode
+ScheduleDAGlnstrs是寄存器分配前后的调度器实现基类,对象是Machininstr实例
+
+ScheduleDAGRRList 类继承自ScheduleDAGSDNodes
+burrListDAGScheduler 自底向上表示从 DAG 的使用者/根节点开始选择，然后反向构造最终指令顺序
+sourceListDAGScheduler  按照 DAG 节点记录的原始顺序进行调度
+hybridListDAGScheduler
+如果某条长延迟指令位于关键路径，会尽量提前发射
+如果提前发射会显著增加寄存器压力，则可能推迟
+优先选择既能推进关键路径又不会制造太多活跃值的节点
+ILPListDAGScheduler
+暴露更多指令级并行
+          ↕
+避免寄存器压力过高
+这些调度器一般只在当前 SelectionDAG 对应的基本块或调度区域内重排，不做跨整个函数的任意移动。
+
+基于优先队列的块内调度
+BURegReductionPrioritqueue
+### ScheduleDAGRRList 类  Schedule()
+创建依赖图,根据SelectionDAG对象构建的SUnit图,但不包括调度无关节点
+SUnit 图中的每个 SUnit对象表示粘合在一起的 DAGNode 节点
+SUnit图构建的三个过程
+1.聚类
+2.构建sunit节点 普通情况 一个SDNode → 一个SUnit
+但通过 Glue 连起来的节点会被合并成一个 SUnit
+BuildSchedUnits() 会把所有 Glue 链合并成一个 SUnit，不论 Glue 是否由 ClusterNodes() 创建。
+3.添加调度依赖
+AddSchedEdges()
+数据依赖/Chain/内存依赖/物理寄存器依赖/延迟信息
