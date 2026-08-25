@@ -190,3 +190,87 @@ BuildSchedUnits() 会把所有 Glue 链合并成一个 SUnit，不论 Glue 是�
 3.添加调度依赖
 AddSchedEdges()
 数据依赖/Chain/内存依赖/物理寄存器依赖/延迟信息
+
+### RegReductionPriorityQueue
+每一种 ScheduleDAGRRList 类都有 对应的RegReductionPriorityQueue(SchedulingPriorityQueue),但是排序不同,不同调度器优先级不同
+using BURegReductionPriorityQueue =
+    RegReductionPriorityQueue<bu_ls_rr_sort>;
+
+using SrcRegReductionPriorityQueue =
+    RegReductionPriorityQueue<src_ls_rr_sort>;
+
+using HybridBURRPriorityQueue =
+    RegReductionPriorityQueue<hybrid_ls_rr_sort>;
+
+using ILPBURRPriorityQueue =
+    RegReductionPriorityQueue<ilp_ls_rr_sort>;
+| 调度器 | Sethi–Ullman 的地位 |
+|---|---|
+| `burrList` | 核心优先级 |
+| `sourceList` | 原始顺序相同时的后备规则 |
+| `hybridList` | 压力和延迟无法区分时的后备规则 |
+| `ILPList` | ILP、压力、关键路径无法区分时的后备规则 |
+使用sethi-ullman算法最小化寄存器压力
+
+四种不同的优先队列决定了当候选指令不止一条时,指令的排序,BURR 是在 SelectionDAG 的反向拓扑排序过程中，对当前拓扑上同时就绪、互不依赖的候选 SUnit，结合寄存器压力、延迟和硬件约束进行优先级选择。
+AvailableQueue = {A, B}
+        ↓
+BURRSort(A, B)
+
+Source
+优先保持原始LLVM IR顺序
+无法区分时使用BURRSort
+
+Hybrid
+寄存器压力
++ 指令延迟
++ 流水线Stall
++ BURRSort兜底
+ILP
+寄存器压力变化
++ Live Uses
++ 流水线Stall
++ 关键路径
++ 指令级并行
++ BURRSort兜底
+
+# PRE-RA调度
+SelectionDAG 指令选择与调度
+        ↓
+EmitSchedule：生成 MachineInstr
+        ↓
+FinalizeISel
+        ↓
+Machine SSA 优化 EarlyTailDuplicate/OptimizePHIs/StackColoring/LocalStackSlotAllocation/DeadMachineInstructionElim/addILPOpts/MachineCSE/MachineSinking
+        ↓
+PHI 消除(完成后machinIR退出SSA)/DetectDeadLanes/ProcessImplicitDefs/UnreachableMachineBlockElim/LiveVariables(块级活跃性、kill/dead 信息)/LiveIntervals(基于指令位置的精确活跃区间)
+        ↓
+TwoAddress 转换
+        ↓
+寄存器合并
+        ↓
+独立子寄存器重命名
+        ↓
+Pre-RA MachineScheduler
+考虑延迟、资源和寄存器压力重新排序
+指令选择完成后,是已经调度过的machineinstr,再重新构成调度DAG,构建sunit,构建调度区域,从底向上分析
+
+## LiveVariables
+SlotIndexes 给指令编号 SlotIndexes下分4个slot SlotIndex
+| Slot | 含义 |
+|---|---|
+| `B` | Block 边界位置 |
+| `e` | Early-clobber 位置 |
+| `r` | 普通寄存器读取/定义位置 |
+| `d` | Dead definition 结束位置 |
+核心数据结构
+class VNInfo {
+    unsigned id;     // 值编号,同一个值可能有不同编号,表示其定义的唯一性
+    SlotIndex def;   // 这个值的定义位置
+};
+
+struct Segment {
+    SlotIndex start;
+    SlotIndex end;
+    VNInfo *valno;   // 该区间保存的是哪个值,且segment有唯一性
+};
