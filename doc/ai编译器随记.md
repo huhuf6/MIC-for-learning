@@ -129,11 +129,164 @@ BuildXlaOpsPass 将_XlacompiledKernel属性值为真的节点替换为_Xla_compi
 BuildXlaOpsPass 中 _XlaCompile OpKernel负责代码生成
 
 
+# IR设计
+高阶IR处理张量
+低阶处理变量,提供计算调优和内存访问,挖掘硬件潜力
+低阶IR:
+1.基于halide的ir
+2.基于多面体的ir polyhedral model
+3.其他
+
+# AI 编译器前端优化?
+AI 编译器前端可以对计算图做不同类型和层次的图优化。 例如， 通过算子融合，可以将多个
+小操作融合在一起， 减少数据传输；通过常量折叠，可以减少执行开销； 通过静态内存规划pass,
+可以为中间张量预先分配内存。 这些优化方法都是图的局部块级优化。 2.1. J 节介绍了涉及多个优
+化过程的全局图优化方法。 例如， 数据布局转换是全局图优化的重要环节， 其目的是优化计算图中
+张最的数据布局，因为相同操作在不同数据布局上执行性能可能不同， 而且，不同硬件的最优数据
+布局也各不相同。 通过数据布局转换， 将内部数据布局转换为对后端友好的布局形式， 可更好地在
+目标硬件执行计算。 例如， 在GPU 上， NCHW格式的操作通常运行速度更快， 因而其他格式的张
+量可以先转换为NCHW格式。
+
+# AI 编译器后端
+Al 编译器中采用的硬件相关优化方法主要包括： 硬件intrinsic 映射、内存延迟隐藏、循环优化
+和并行化。 硬件intrinsic 映射是一种将低阶IR 中的特定操作模式映射为优化内核的机制。 而内存延
+迟隐藏的基本思想是通过重叠内存计算操作， 使内存利用率和计算效率最大化。 2.1.2节介绍了在
+TVM 中使用硬件intrinsic 映射的方法和示例代码， TVM 中的内存延迟隐藏实现方法将在第4 章中介
+绍。 循环优化和并行化是提高深度学习模型中计算密集操作效率的关键。 循环优化中采用的关键技
+术包括循环融合、滑动窗口、分片、 循环重新排序和循环展开。 LLVM 巳经集成了循环优化技术，
+可以在AI 编译器后端直接使用。 Halide使用并行调度原语来并行化计算任务， 为线程级并行指定
+循环的并行化维度。 其中的每个并行任务可以进一步递归地细分为子任务， 以便充分利用目标体系
+结构上的多级线程层次结构。 Halide可以用向最语句替换循环，然后通过硬件intrinsic 映射将向批
+语句映射为硬件相关的SIMD操作码。 Glow依赖于厂商提供的优化算子库，而且 Glow将向量化处
+理放到LLVM 中完成，因为只要有张量尺寸和循环轮次信息， LLVM 自动向量化功能就完全可以正
+常工作。 上述编译器后端的各种设计技术利用软硬件设计特性可以实现更好的数据局部性和并行
+化，最终将AI模型的计算图转换为不同硬件上的高效机器码实现。
+
+# TVM RELAY/RELAX IR
+Relay Dataflow
+-> 以共享表达式节点和数据边为主
+
+Relay ANF
+-> 嵌套 Let，每个变量单次绑定
+
+Relax
+-> SeqExpr + BindingBlock + VarBinding
+-> 扁平 ANF，具有 functional SSA 性质
+
+MLIR/LLVM
+-> BasicBlock + block argument/phi
+-> CFG SSA
+
+可以进行
+DCE
+liveness
+constant propagation
+substitution
+fusion
+memory planning
+
+# TVM的数据表示
+TVM 的数据表示包括 张量数据表示、形状表示、数据布局 和 边界推断
+
+## 数据布局和转换pass
+ConvertLayout pass  希望能以最少的数据布局转换次数改变整个图的数据布局．
+并根据算子类型分别指定不同的ITVMConvertOpLayout和 FlnferCorrectLayout 属性值
+
+# TVM 方言
+tvm方言是在图IR级之上的IR,在relay时还使用,在relax时已经内置在relax中
+
+# TVM 定制化后端需要补充接口
+TargetKind
+-> 支持哪些 target 属性
+
+TIR lowering
+-> TIR 如何变成后端能够接受的形式
+
+CodeGen
+-> 如何翻译 For、BufferLoad、Call、线程绑定、intrinsic
+
+Runtime Module
+-> 如何保存代码、查找函数、启动 kernel
+
+DeviceAPI
+-> 如何分配内存、拷贝数据、同步设备
+BuildXXX 是完整 TIR 后端必须提供的最终入口；它内部调用哪些方法没有固定要求，但如果目标是新硬件，通常还需要配套的 TIR lowering、代码生成、Runtime Module，必要时还要实现 DeviceAPI
+
+# SelectionDAG
+
+| 依赖 | SDValue 类型 | 作用 |
+|---|---|---|
+| 数据依赖 | `i32/f32/v4f32/...` | 传递真实计算值 |
+| Chain 依赖 | `MVT::Other` | 约束有副作用操作的先后顺序 |
+LLVM SDep 明确定义四种调度依赖：
+enum Kind {
+  Data,    // true dependence
+  Anti,    // WAR
+  Output,  // WAW
+  Order    // 其他顺序依赖
+};
+call、volatile、barrier
+| Glue 依赖 | `MVT::Glue` | 将机器相关节点紧密绑定、连续调度 |
+
+真依赖：后一个操作需要前一个操作产生的值，不能靠重命名消除。
+
+假依赖：没有数值传递，只因复用寄存器名或存储位置产生，寄存器重命名通常可以消除。
+
 # 指令选择
 
 ## selDAG
 通过vm字节码替换大量类似switch case 的指令选择,自动生成matchtable
 在selectioncode中调用,td文件中写pat/patfrag等规则
+关键数据结构
+class SDnode
+{
+    int32_t NodeType;        // opcode
+    SDUse *OperandList;      // 输入
+    const EVT *ValueList;    // 各个输出的类型
+    SDUse *UseList;          // 哪些节点使用了本节点
+    unsigned NumOperands;
+    unsigned NumValues;
+}
+
+
+class SDValue {
+  SDNode *Node;
+  unsigned ResNo; 某个node的结果
+};
+
+class SDUse {
+  SDValue Val;       // 使用哪个节点的哪个结果
+  SDNode *User;      // 谁在使用它
+  SDUse *Next;       // use-list
+};
+
+具体 DAG 示例
+LLVM IR：
+define i32 @foo(ptr %p, i32 %x) {
+  %a = load i32, ptr %p
+  %b = add i32 %a, %x
+  store i32 %b, ptr %p
+  ret i32 %b
+}
+简化后的 SelectionDAG：
+t0: ch       = EntryToken
+
+t1: i64, ch  = CopyFromReg t0, %p
+t2: i32, ch  = CopyFromReg t0, %x
+
+t3: i32, ch  = load t0, t1
+t4: i32      = add t3:0, t2:0
+t5: ch       = store t3:1, t4, t1
+
+t6: ch       = CopyToReg t5, $eax, t4
+t7: ch       = RET_FLAG t6, $eax
+
+Root = t7 root是SDValue
+
+SDNode EntryNode;          // DAG 起始 chain
+SDValue Root;              // DAG 最终 chain
+ilist<SDNode> AllNodes;    // 所有节点
+FoldingSet<SDNode> CSEMap; // 节点公共子表达式消除
 
 ## globalSel
 IRtranslator 将llvm ir -> gmir
@@ -163,6 +316,17 @@ G_ADD x, y → 普通寄存器加法
 所有调度器的实现类都继承自 ScheduleDAG ScheduleDAG 类的两个子类分别是 ScheduleDAGSDNodes 类和 ScheduleDAGlnstrs,
 ScheduleDAGSDNodes是给指令选择阶段做调度的基类,调度对象是SDnode
 ScheduleDAGlnstrs是寄存器分配前后的调度器实现基类,对象是Machininstr实例
+
+enum Preference {
+  None,        // No preference
+  Source,      // Follow source order.
+  RegPressure, // Scheduling for lowest register pressure.
+  Hybrid,      // Scheduling for both latency and register pressure.
+  ILP,         // Scheduling for ILP in low register pressure mode.
+  VLIW,        // Scheduling for VLIW targets.
+  Fast,        // Fast suboptimal list scheduling
+  Linearize    // Linearize DAG, no scheduling
+};
 
 ScheduleDAGRRList 类继承自ScheduleDAGSDNodes
 burrListDAGScheduler 自底向上表示从 DAG 的使用者/根节点开始选择，然后反向构造最终指令顺序
@@ -247,7 +411,7 @@ PHI 消除(完成后machinIR退出SSA)/DetectDeadLanes/ProcessImplicitDefs/Unrea
         ↓
 TwoAddress 转换
         ↓
-寄存器合并
+寄存器合并,RegisterCoalescer 主要消除 COPY
         ↓
 独立子寄存器重命名
         ↓
@@ -265,7 +429,7 @@ SlotIndexes 给指令编号 SlotIndexes下分4个slot SlotIndex
 | `d` | Dead definition 结束位置 |
 核心数据结构
 class VNInfo {
-    unsigned id;     // 值编号,同一个值可能有不同编号,表示其定义的唯一性
+    unsigned id;     // 值编号,同一个寄存器值可能有不同编号,表示其定义的唯一性
     SlotIndex def;   // 这个值的定义位置
 };
 
@@ -274,3 +438,59 @@ struct Segment {
     SlotIndex end;
     VNInfo *valno;   // 该区间保存的是哪个值,且segment有唯一性
 };
+
+LiveRange = 一组 Segment + VNInfo
+
+## 调度边界(自底向上)
+为什么要区分边界,边界决定调度的最小允许范围
+scheduleRegions()
+  -> getSchedRegions()              只划分 region
+  -> Scheduler.enterRegion()        只记录 RegionBegin/RegionEnd
+  -> ScheduleDAGMILive::schedule()
+     -> buildDAGWithRegPressure()
+        -> buildSchedGraph()
+           -> clearDAG()
+           -> initSUnits()
+           -> 构建 SDep 依赖边
+  -> pickNode()/scheduleMI()         使用已经建好的 SUnit 调度
+
+PreRA:
+  使用虚拟寄存器和 LiveIntervals
+  主要关注延迟、资源和寄存器压力
+  FixKillFlags = false
+
+PostRA:
+  已经分配物理寄存器
+  调度后需要修复 kill 标记
+  FixKillFlags = true
+
+Scheduler.schedule()
+    PreRA 实际调用：
+    ScheduleDAGMILive::schedule()
+    主要步骤：
+    buildDAGWithRegPressure();
+    postProcessDAG();
+    findRootsAndBiasEdges();
+    SchedImpl->initialize(this);
+    initQueues();
+
+    while (SUnit *SU = SchedImpl->pickNode(IsTopNode)) {
+    scheduleMI(SU, IsTopNode);
+    SchedImpl->schedNode(SU, IsTopNode);
+    updateQueues(SU, IsTopNode);
+    }
+以region为单位构建sunitDAG,region 为单位构建 SUnit DAG，region 之间禁止跨界调度
+
+pre-RA中sunit的依赖进行了重建
+显式/隐式寄存器 operand -> Data/Anti/Output
+MachineMemOperand + AA   -> Order
+call/unmodeled side effect -> Barrier
+terminator/特殊状态指令   -> scheduling boundary
+Glue 语义如何延续
+例如 x86 比较和条件跳转：
+SelectionDAG：
+CMP -> glue -> JCC
+生成 MIR：
+CMP32rr %0, %1, implicit-def $eflags
+JCC_1 %bb.1, implicit $eflags
+PreRA 不再看到 Glue，但能根据 $eflags 重建：
