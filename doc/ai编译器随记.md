@@ -494,3 +494,85 @@ CMP -> glue -> JCC
 CMP32rr %0, %1, implicit-def $eflags
 JCC_1 %bb.1, implicit $eflags
 PreRA 不再看到 Glue，但能根据 $eflags 重建：
+
+RegPressure 保存整个当前 region 的：
+struct RegisterPressure {
+  std::vector<unsigned> MaxSetPressure;
+  SmallVector<RegisterMaskPair> LiveInRegs;
+  SmallVector<RegisterMaskPair> LiveOutRegs;
+};
+
+指令边界级状态
+RegPressureTracker 内部：
+MachineBasicBlock::const_iterator CurrPos;
+LiveRegSet LiveRegs;
+std::vector<unsigned> CurrSetPressure;
+
+单条 SUnit 的压力变化
+每条指令对应一个 SUnit，它有自己的：
+SUPressureDiffs[SU->NodeNum]
+
+PressureSet
+-> 一组虚拟寄存器共同消耗哪些有限物理寄存器资源
+例如简化硬件：
+物理寄存器：R0 R1 R2 R3
+LOW_GPR  = {R0, R1}
+ALL_GPR  = {R0, R1, R2, R3}
+
+scheduleMI(SU, IsTopNode);          // 移动指令、更新压力
+SchedImpl->schedNode(SU, IsTopNode);// 更新 cycle 和硬件资源
+updateQueues(SU, IsTopNode);        // 更新 DAG，释放新节点
+
+picknode是从候选选择调度节点的主要决定算法
+只有一个候选
+SU = Bot.pickOnlyChoice();
+pickOnlyChoice() 会：
+1. 检查 Pending 中是否有节点已经可以发射
+2. 将当前产生 hazard 的 Available 节点移到 Pending
+3. 如果 Available 为空，推进 cycle
+4. 如果最终只有一个 Available 节点，直接返回
+5. 如果有多个候选，返回 nullptr，进入启发式比较
+多个候选
+initCandidate()
+为候选计算动态寄存器压力：
+RPTracker.getUpwardPressureDelta(
+    SU->getInstr(),
+    DAG->getPressureDiff(SU),
+    Cand.RPDelta,
+    ...);
+得到：
+RPDelta.Excess
+RPDelta.CriticalMax
+RPDelta.CurrentMax
+tryCandidate()
+它不是计算总分，而是按层次逐项比较：
+1. 缩短物理寄存器 live range
+2. 避免超过寄存器数量限制 RegExcess
+3. 避免增加关键寄存器压力 RegCritical
+4. 避免 latency stall
+5. 保持 clustered 节点相邻
+6. 处理 weak edge
+7. 避免增加 region 最大压力 RegMax
+8. 平衡处理器资源
+9. 避免延长关键路径
+10. 原始 NodeOrder 兜底
+前面的启发式一旦区分出优劣，后面的就不再参与。
+双向调度
+1. Bottom 只有一个候选 -> 直接选 Bottom
+2. Top 只有一个候选 -> 直接选 Top
+3. 分别选出最佳 BotCand 和 TopCand
+4. 比较两个方向的最佳候选
+5. 返回最终节点，并设置 IsTopNode
+
+因此整个 while 的本质是：
+pickNode
+-> 从 ready 节点中做性能选择
+
+scheduleMI
+-> 把选择落实到 MIR，并更新寄存器压力
+
+schedNode
+-> 更新目标处理器 cycle/资源状态
+
+updateQueues
+-> 消耗依赖边，产生下一批 ready 节点
