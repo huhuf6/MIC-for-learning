@@ -576,3 +576,163 @@ schedNode
 
 updateQueues
 -> 消耗依赖边，产生下一批 ready 节点
+
+
+## 调度策略
+
+ScheduleDAGMI                           MachineSchedStrategy
+─────────────────────────────────       ─────────────────────────────
+构建 SUnit DAG                          维护策略相关 ready queue
+维护 Data/Anti/Output/Order 依赖         选择下一个 SUnit
+实际移动 MachineInstr                   决定 Top-down/Bottom-up
+更新 DAG 节点状态                        比较延迟、压力、资源等代价
+更新 LiveIntervals
+
+buildSchedGraph()
+→ ScheduleDAGMI 根据寄存器和内存依赖建立 SUnit DAG
+
+initialize(this)
+→ Strategy 获得 DAG、SchedModel、寄存器信息并初始化状态
+
+initQueues()
+→ 找出无前驱/无后继节点
+→ 调用 releaseTopNode()/releaseBottomNode() 放入策略的 ready queue
+
+pickNode(IsTopNode)
+→ Strategy 从 ready queue 选择下一条指令
+→ 同时决定从顶部还是底部调度
+
+moveInstruction()
+→ ScheduleDAGMI 真正修改 MachineBasicBlock 中的指令顺序
+
+schedNode()
+→ 通知 Strategy 更新 cycle、资源占用、寄存器压力等状态
+
+updateQueues()
+→ 去掉已满足的依赖
+→ 新节点可调度时再次调用 releaseTopNode()/releaseBottomNode()
+因此可以概括为：
+Strategy 选择节点
+ScheduleDAGMI 执行移动
+DAG 释放新节点
+Strategy 再次选择
+
+# POST-RA
+
+传统策略：
+SchedulePostRATDList
+
+通用 MachineSchedStrategy：
+PostGenericScheduler
+
+通用策略的目标扩展：
+AArch64PostRASchedStrategy
+PPCPostRASchedStrategy
+
+完全独立的目标策略：
+SystemZPostRASchedStrategy
+
+## 1. 传统 Post-RA List Scheduler
+PostRAScheduler
+  -> SchedulePostRATDList
+  -> Top-Down List Scheduling
+SchedulePostRATDList 不继承 MachineSchedStrategy，而是直接继承 ScheduleDAGInstrs。
+主要策略：
+1. 只做 Top-Down 调度
+2. 优先关键路径上的节点
+3. 使用 HazardRecognizer 检查流水线冲突
+4. 必要时停顿或插入 NOP
+5. 可做物理寄存器反依赖消除
+
+## PostGenericScheduler
+这是通用 Post-RA 策略：
+new ScheduleDAGMI(
+    C,
+    std::make_unique<PostGenericScheduler>(C),
+    /*RemoveKillFlags=*/true);
+它也是 Top-Down 单向调度：
+IsTopNode = true;
+候选优先级大致为：
+1. Stall
+   优先选择流水线等待周期更少的节点
+
+2. Cluster
+   尽量保持 macro-fusion、load/store cluster 相邻
+
+3. ResourceReduce
+   避免继续占用当前关键处理器资源
+
+4. ResourceDemand
+   使用当前相对空闲或需要平衡的资源
+
+5. Latency
+   避免形成过长的串行依赖链
+
+6. NodeOrder
+   都相同时保持原始指令顺序
+
+# 调度器pass定制
+作为调度pass 实现类， MachineScheduler 和 PostMachineScheduler 的优点之一是允许开发者在
+LLVM 已有调度算法和策略基础上做不同粒度的定制化。
+
+## 调度策略定制
+overrideSchedPolicy 函数中指定，以此在子目标层级设定指令调度的配置选项
+
+## MachineSchedStrategy 接口定制
+ScheduleDAGMI / ScheduleDAGMILive
+→ 通用调度机制
+
+MachineSchedStrategy
+→ 可替换的目标相关选点策略
+哪些代码可以复用
+大多数后端不需要重新实现：
+1. 从 MachineInstr 构建 SUnit
+2. 根据寄存器、内存关系构建依赖边
+3. 查找 DAG 根节点
+4. 移动 MachineInstr
+5. 更新 LiveIntervals
+6. 删除已满足的依赖
+7. 重复执行调度循环
+
+通过重写MachineSchedStrategy 接口的方法实现自定义调度算法的工作量较大。 如果希望仅
+对GenericScheduler 类中已有的启发式策略做调整， 但复用大部分调度框架基础设施，则可以由 Ge
+nericScheduler 类派生自定义子类，在其中添加定制调度策略， 实现某些 GenericScheduler 类中未定
+义的架构行为。
+
+##  ScheduleDAGMILive 类定制
+定制目标后端的MachineSchedStrategy 接口就应该足以实现新的调度算法。不过， 目标厄
+端调度程序可以通过进一步派生目己的ScheduleDAGMILive类,并且重载Schedule函数 实现任何后端特定的调度处理
+
+# 寄存器分配算法
+
+## Fast
+RegAllocFast 是一个面向快速编译的基本块局部寄存器分配器。它不构建完整的 LiveInterval、干涉图或 LiveRegMatrix
+逐基本块处理
+→ 从块尾向块头扫描指令(块内反向扫描)
+→ 只维护扫描位置处哪些虚拟寄存器正在存活
+→ 遇到需要寄存器的 operand 就立即分配
+→ 没有空闲寄存器就立即驱逐并 spill
+
+LiveVirtRegs
+维护正向语义下当前存活的映射：
+虚拟寄存器 → 物理寄存器
+%0          → $eax
+%1          → $ecx
+每个 LiveReg 还记录：
+LastUse  最后一次使用
+LiveOut  是否可能跨基本块
+Reloaded 是否因驱逐而需要内存副本
+Error    是否无法分配
+## Greedy
+在寄存器分配之前，需要做很多准备工作，如指令序号标记、活跃性分析等。
+ 在LiveVariables 类中实现的活跃变量分析 (live variable analysis) 和在
+压Liveinterval 类中实现的生存期分析 (live interval analysis) 。 这些都是在寄存器分配 pass 之外的其他
+pass 中完成。 greedy寄存器分配pass可以进一步细分为不同步骤， 包括： 溢出权重汁算 (spill weight
+eulr.ulation ) 、生存期入队列 (enqueue) 、指定物理并存器 ( assignmrnt) 、剔除生存期 ( eviction) 、
+liveinterval切分 (splitting) 和生存期溢出 (spilling) 等
+## Basic
+按照 spill weight 使用优先队列
+
+## PBQP
+
+## 线性分配器
