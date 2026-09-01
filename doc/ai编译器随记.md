@@ -730,6 +730,160 @@ Error    是否无法分配
 pass 中完成。 greedy寄存器分配pass可以进一步细分为不同步骤， 包括： 溢出权重汁算 (spill weight
 eulr.ulation ) 、生存期入队列 (enqueue) 、指定物理并存器 ( assignmrnt) 、剔除生存期 ( eviction) 、
 liveinterval切分 (splitting) 和生存期溢出 (spilling) 等
+
+LiveIntervals 最终主要给出两类真正的活跃区间，以及一类辅助约束：
+1. 虚拟寄存器 LiveInterval
+2. 物理寄存器 Register Unit LiveRange
+3. RegMask 调用破坏位置，不是 LiveInterval
+
+class RAGreedy {
+  class ExtraRegInfo {
+    struct RegInfo {
+      LiveRangeStage Stage = RS_New;
+      unsigned Cascade = 0;
+    };
+
+    IndexedMap<RegInfo, VirtReg2IndexFunctor> Info;
+  };
+
+  std::optional<ExtraRegInfo> ExtraInfo;
+};
+
+Stage
+RS_New
+        | 第一次入队
+        v
+RS_Assign
+        | 分配失败，延迟到第二轮
+        v
+RS_Split
+        | 切分进展不足
+        v
+RS_Split2
+        | 仍然无法分配
+        v
+RS_Spill -> RS_Memory/RS_Done
+### 溢出权重的计算
+
+RegAllocBase::init(...);
+VRAI->calculateSpillWeightsAndHints();
+allocatePhysRegs();
+tryHintsRecoloring();
+postOptimization();
+
+`VirtRegAuxInfo::calculateSpillWeightsAndHints()` 遍历所有虚拟寄存器，并通过
+`weightCalcHelper()` 计算每个 `LiveInterval` 的溢出权重和 COPY 分配提示。
+
+```text
+UseDefFreq = sum((Reads + Writes) * BlockFreqRelativeToEntry * LoopFactor)
+
+SpillWeight = UseDefFreq * HintFactor * RematFactor
+              / (LI.getSize() + 25 * SlotIndex::InstrDist)
+```
+
+各项含义：
+
+| 因素 | 取值/计算 | 语义 |
+| --- | --- | --- |
+| `Reads + Writes` | 只读或只写为 1，读写为 2 | def/use 越多，spill 后需要的访存越多 |
+| `BlockFreqRelativeToEntry` | `Freq(MBB) / Freq(Entry)` | 热基本块中的 def/use 权重更高 |
+| `LoopFactor` | 疑似循环归纳变量更新为 3，否则为 1 | 避免频繁 spill 循环归纳变量 |
+| `HintFactor` | 存在 COPY hint 时为 1.01，否则为 1 | 轻微保护 COPY 合并机会 |
+| `RematFactor` | 所有定义均可重物质化时为 0.5，否则为 1 | 可重新计算的值更适合 spill |
+| `LI.getSize()` | LiveInterval 的 SlotIndex 长度 | 区间越长、使用越稀疏，权重越低 | 如 LI(%0) = [16r,48r) \(LI.getSize()=distance(16r,48r)=32\)
+| `25 * InstrDist` | 固定平滑项 | 避免短区间过度受 SlotIndex 间距影响 |
+
+单条指令的基础贡献：
+
+```cpp
+Weight = (isDef + isUse) *
+         MBFI->getBlockFreqRelativeToEntryBlock(MBB);
+```
+
+计算时忽略 debug 指令、identity COPY、`IMPLICIT_DEF`，同一条指令即使有多个相关
+operand 也只统计一次。局部切分候选还会加入切分边界两条 COPY 的预估代价。
+
+不可 spill 的区间不使用普通公式，其 `weight` 保持为 `huge_valf`。权重越高表示动态
+spill 代价越大，在 eviction、splitting 和 spilling 决策中越应保留在寄存器；当前
+Greedy 的初始优先队列并非只按 spill weight 排序。
+
+
+### 优先级队列
+
+`allocatePhysRegs()` 是分配驱动循环。`seedLiveRegs()` 先将所有非空虚拟寄存器的
+`LiveInterval` 入队；成功分配的区间不再入队，延迟处理的原区间或 split/spill 产生的
+新区间会重新入队，直到队列为空。
+
+```cpp
+seedLiveRegs();
+
+while (const LiveInterval *VirtReg = dequeue()) {
+  VirtRegVec SplitVRegs;
+  MCRegister PhysReg =
+      selectOrSplit(*VirtReg, SplitVRegs);
+
+  if (PhysReg)
+    Matrix->assign(*VirtReg, PhysReg);
+
+  for (Register Reg : SplitVRegs)
+    enqueue(&LIS->getInterval(Reg));
+}
+```
+
+队列是一个最大堆：
+
+```cpp
+using PQueue = std::priority_queue<std::pair<unsigned, unsigned>>;
+
+Priority = PriorityAdvisor->getPriority(*LI);
+Queue.push({Priority, ~Reg.id()});
+```
+
+排序算法：
+
+```text
+先比较 Priority：值大的先出队
+Priority 相同：比较 ~Reg.id()，值大的先出队
+等价于 Priority 相同时，虚拟寄存器编号小的先出队
+```
+
+默认 `getPriority()` 的核心算法：
+
+```text
+if Stage == RS_Split:
+  Priority = LI.getSize()                 // 延迟到主队列处理完
+else if Stage == RS_Memory:
+  Priority = MemorySequence++             // 内存区间最后处理
+else:
+  if Stage == RS_Assign && LI 仅在一个 MBB 中 && !ForceGlobal:
+    if !ReverseLocalAssignment:
+      LowBits = distance(LI.beginIndex(), FunctionLastIndex)
+    else:
+      LowBits = distance(FunctionZeroIndex, LI.endIndex())
+    GlobalBit = 0
+  else:
+    LowBits = LI.getSize()                // global/split product 长区间优先
+    GlobalBit = 1
+
+  Priority = min(LowBits, 2^24 - 1)
+  Priority |= StageBit << 31
+  Priority |= KnownPhysRegHint << 30
+  Priority |= GlobalBit 和 RegClass::AllocationPriority 对应的高位
+```
+
+高位优先级大致为：
+
+```text
+bit 31      主分配状态优先于 RS_Split/RS_Memory
+bit 30      已知物理寄存器偏好
+bit 29..24  global 属性和寄存器类 AllocationPriority
+bit 23..0   LiveInterval 大小或 local 指令位置
+```
+
+`RegClassPriorityTrumpsGlobalness` 决定寄存器类优先级和 `GlobalBit` 谁占更高位。当前默认
+队列排序不直接使用 spill weight：队列优先级决定谁先分配；spill weight 主要决定发生
+冲突时谁更值得保留，以及 eviction、splitting、spilling 的代价。
+
 ## Basic
 按照 spill weight 使用优先队列
 
