@@ -237,6 +237,26 @@ call、volatile、barrier
 ## selDAG
 通过vm字节码替换大量类似switch case 的指令选择,自动生成matchtable
 在selectioncode中调用,td文件中写pat/patfrag等规则
+
+LLVM IR
+-> 构建初始 SelectionDAG
+-> DAGCombine(BeforeLegalizeTypes)
+-> LegalizeTypes
+-> DAGCombine(AfterLegalizeTypes)
+-> LegalizeVectors
+-> DAGCombine(AfterLegalizeVectorOps)
+-> Legalize operations
+-> DAGCombine(AfterLegalizeDAG)
+-> DoInstructionSelection
+-> SelectionDAG Scheduler
+-> EmitSchedule
+-> MachineInstr
+
+DAGCombine 是对 SelectionDAG 做图重写、化简和目标相关优化集合pass
+LegalizeVectors处理类型已经基本合法，但目标不支持的向量操作
+LegalizeTypes类型合法化
+Legalize operations操作合法化
+
 关键数据结构
 class SDnode
 {
@@ -736,6 +756,18 @@ LiveIntervals 最终主要给出两类真正的活跃区间，以及一类辅助
 2. 物理寄存器 Register Unit LiveRange
 3. RegMask 调用破坏位置，不是 LiveInterval
 
+RegUnit
+AL  -> {U0}
+AH  -> {U1}
+AX  -> {U0, U1}
+EAX -> {U0, U1, U2}
+RAX -> {U0, U1, U2, U3}
+RBX -> {U4, U5, U6, U7}
+
+RegMask
+regmask 是附加在某条 MachineInstr 上的位图，用来描述：
+这条指令执行后，哪些物理寄存器仍然保持原值，哪些会被破坏。
+
 class RAGreedy {
   class ExtraRegInfo {
     struct RegInfo {
@@ -756,12 +788,18 @@ RS_New
 RS_Assign
         | 分配失败，延迟到第二轮
         v
-RS_Split
-        | 切分进展不足
-        v
-RS_Split2
-        | 仍然无法分配
-        v
+RS_Split 普通assgin/evict失败 进入 RS_Split stage
+        | 切分成功且新区间严格变小
+        +--------------------------> 新区间 RS_New
+        |
+        | 切分成功但主区间没有变小
+        +--------------------------> 主区间 RS_Split2
+                                      |
+                                      | 强制严格缩小
+                                      | Global：跳过 Region Split
+                                      | Local：要求 NewGaps < NumGaps
+                                      v
+                            更激进切分成功 / 否则 spill
 RS_Spill -> RS_Memory/RS_Done
 ### 溢出权重的计算
 
@@ -883,6 +921,101 @@ bit 23..0   LiveInterval 大小或 local 指令位置
 `RegClassPriorityTrumpsGlobalness` 决定寄存器类优先级和 `GlobalBit` 谁占更高位。当前默认
 队列排序不直接使用 spill weight：队列优先级决定谁先分配；spill weight 主要决定发生
 冲突时谁更值得保留，以及 eviction、splitting、spilling 的代价。
+
+## PRE-RA调度后仍然可能需要spill的原因
+
+PRE-RA 调度和寄存器分配解决的是不同问题：PRE-RA 在不破坏依赖的前提下调整
+`MachineInstr` 顺序，尽量降低估算的寄存器压力；寄存器分配则把每个
+`LiveInterval` 映射到具体物理寄存器，并检查真实冲突。因此：
+
+```text
+较低的 PressureSet 压力 != 一定存在合法的物理寄存器分配
+```
+
+| 对比项 | PRE-RA 调度 | 寄存器分配 |
+| --- | --- | --- |
+| 操作对象 | 当前 scheduling region 中的 `SUnit` | 整个函数中的 `LiveInterval` |
+| 决策 | 下一条调度哪条指令 | vreg 分配给哪个物理寄存器 |
+| 寄存器模型 | `RegisterClass -> PressureSet + Weight` | `RegisterClass -> AllocationOrder` 中的具体物理寄存器 |
+| 冲突模型 | 当前/最大压力及相对 `limit` 的增量 | `SlotIndex` 上的精确 interval、RegUnit、regmask 冲突 |
+| 优化目标 | 同时平衡压力、延迟、stall、cluster 和执行资源 | assign、evict、recolor、split，最后才 spill |
+| 作用范围 | 只能在 region 内重排，不能越过依赖和调度边界 | 处理跨基本块、循环、调用点的全函数生存期 |
+
+PRE-RA 根据 vreg 的具体 `RegisterClass` 找到它影响的 PressureSet 和权重：
+
+```cpp
+const TargetRegisterClass *RC = MRI->getRegClass(Reg);
+PSet = TRI->getRegClassPressureSets(RC);
+Weight = TRI->getRegClassWeight(RC).RegWeight;
+```
+
+对候选指令 `SU`，可以近似理解为计算：
+
+```text
+NewPressure[PSet] = CurrentPressure[PSet] + Delta(SU, PSet)
+```
+
+然后通过 `RegExcess`、`RegCritical` 和 `RegMax` 避免超过 PressureSet limit 或继续
+提高峰值。PressureSet 会尽量表达窄寄存器类和类别交叠，但仍是聚合模型；它不会在每次
+`pickNode()` 时为全部 vreg 枚举物理寄存器并执行一次完整寄存器分配。
+
+寄存器分配阶段才对每个候选物理寄存器进行精确判断：
+
+```text
+IK_RegMask  : CALL/inline asm 是否破坏该物理寄存器
+IK_RegUnit  : 是否和固定物理寄存器及其 alias/subregister 冲突
+IK_VirtReg  : 是否和已经占用该物理寄存器的 LiveInterval 冲突
+```
+
+例如，目标共有四个 GPR，但一次调用只保留 `R3`：
+
+```llvm
+%a:gpr = DEF_A
+%b:gpr = DEF_B
+CALL @foo, csr_clobbers_r0_r1_r2
+%sum:gpr = ADD %a, %b
+```
+
+PRE-RA 看到两个活跃 GPR，可能得到：
+
+```text
+Pressure[GPR] = 2 <= Limit[GPR] = 4
+```
+
+但 RA 在调用点进行具体分配时得到：
+
+```text
+%a: R0/R1/R2 -> IK_RegMask，R3 -> 可用，因此 %a -> R3
+%b: R0/R1/R2 -> IK_RegMask，R3 -> 与 %a 冲突
+```
+
+于是 `%b` 仍需切分并溢出：
+
+```llvm
+%b:gpr = DEF_B
+STORE %b, %stack.0
+CALL @foo, csr_clobbers_r0_r1_r2
+%b.reload:gpr = LOAD %stack.0
+%sum:gpr = ADD %a, %b.reload
+```
+
+PRE-RA 后仍然出现 spill 的主要原因包括：
+
+1. 数据依赖要求多个操作数必须同时活跃，调度无法继续缩短生存期。
+2. region 内压力较低，但 live interval 会跨 region、基本块、循环和调用点。
+3. PressureSet 是近似模型，RA 还要检查具体寄存器类、保留寄存器、regmask、别名、子寄存器、tied operand 和 early-clobber。
+4. PRE-RA 是兼顾延迟与吞吐的启发式算法，可能接受较高压力来缩短关键路径或减少流水线 stall。
+5. RA 可能认为冷路径 spill/split 比首次使用 callee-saved 寄存器并在序言、结尾保存恢复更便宜。
+
+```text
+PRE-RA：通过指令排序降低发生 spill 的概率。
+RA：在真实物理寄存器约束下确定是否必须 spill。
+```
+Region 划分、SUnit、Ready Queue、调度循环：基本相同
+DAG 构建输入和依赖边：明显不同
+寄存器压力分析：只有 PRE-RA
+物理寄存器假依赖和 hazard：POST-RA 更重要
+pickNode 策略：也不同，但只是差异的一部分
 
 ## Basic
 按照 spill weight 使用优先队列
