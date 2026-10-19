@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Schema for norm-rules.json",
+  "description": "Each normative tag in a standards document is one normative rule. The rule name is the tag name without the \"norm:\" prefix.",
+  "type": "object",
+
+  "definitions": {
+    "normativeRuleEntry": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Normative rule name (the tag name without the \"norm:\" prefix)"
+        },
+        "chapter_name": {
+          "type": "string",
+          "description": "Title of the chapter in the standards document that contains the tag"
+        },
+        "text": {
+          "type": "string",
+          "description": "Text of the tag in the standards document"
+        },
+        "tag_filename": {
+          "type": "string",
+          "description": "Name of the tag file that contains the tag"
+        },
+        "stds_doc_url": {
+          "type": "string",
+          "description": "URL of the standards document that contains the tag"
+        }
+      },
+      "required": ["name", "chapter_name", "text", "tag_filename", "stds_doc_url"],
+      "additionalProperties": false
+    }
+  },
+
+  "properties": {
+    "normative_rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/normativeRuleEntry"
+      }
+    }
+  },
+  "required": ["normative_rules"],
+  "additionalProperties": false
+}

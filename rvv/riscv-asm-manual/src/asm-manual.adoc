@@ -1,0 +1,1779 @@
+== Command-Line Arguments
+// 中文：命令行参数
+
+This manual covers the standard RISC-V assembly language.
+// 中文：本手册介绍标准 RISC-V 汇编语言。
+
+Open-source assemblers, such as GNU and LLVM assemblers, adhere to the
+standards specified in this document.
+// 中文：GNU 和 LLVM 等开源汇编器遵循本文档规定的标准。
+
+For example, typical command-line arguments can be found in the binutils
+user guide, which lists
+https://sourceware.org/binutils/docs/as.html#Overview[generic assembler command line options]
+as well as
+https://sourceware.org/binutils/docs/as.html#RISC_002dV_002dDependent[RISC-V-specific options],
+that are mostly applicable to both GNU and LLVM assemblers.
+// 中文：例如，常见的命令行参数可在 binutils 用户指南中查到，其中列出了“通用汇编器命令行选项”和“RISC-V 专用选项”（见原文链接）；这些选项大多同时适用于 GNU 和 LLVM 汇编器。
+
+== Registers
+// 中文：寄存器
+
+Registers are the most important part of any processor. RISC-V defines various
+types, depending on which extensions are included: The general registers (with
+the program counter), control registers, floating point registers (F extension),
+and vector registers (V extension).
+// 中文：寄存器是任何处理器最重要的组成部分。
+// 中文：RISC-V 根据所包含的扩展定义了多种寄存器：通用寄存器（以及程序计数器）、控制寄存器、浮点寄存器（F 扩展）和向量寄存器（V 扩展）。
+
+=== General registers
+// 中文：通用寄存器
+
+The RV32I base integer ISA includes 32 registers, named `x0` to `x31`. The
+program counter `PC` is separate from these registers, in contrast to other
+processors such as the ARM-32. The first register, `x0`, has a special function:
+Reading it always returns 0 and writes to it are ignored. As we will see later,
+this allows various tricks and simplifications.
+// 中文：RV32I 基础整数指令集包含 32 个寄存器，名称为 `x0` 到 `x31`。
+// 中文：与 ARM-32 等处理器不同，程序计数器 `PC` 独立于这些寄存器。
+// 中文：第一个寄存器 `x0` 有特殊用途：读取它总是得到 0，写入它则会被忽略。
+// 中文：后文将介绍如何利用这一特性实现各种技巧和简化操作。
+
+In practice, the programmer doesn't use this notation for the registers. Though
+`x1` to `x31` are all equally general-use registers as far as the processor is
+concerned, by convention certain registers are used for special tasks. In
+assembler, they are given standardized names as part of the RISC-V *application
+binary interface* (ABI). This is what you will usually see in code listings. If
+you really want to see the numeric register names, the `-Mnumeric` argument to
+objdump will provide them.
+// 中文：实际编程时，程序员通常不使用这种编号来称呼寄存器。
+// 中文：虽然从处理器的角度看，`x1` 到 `x31` 都是同样的通用寄存器，但按照约定，某些寄存器用于特定任务。
+// 中文：在汇编语言中，它们具有标准名称，这些名称是 RISC-V 应用程序二进制接口（ABI）的一部分，也是代码清单中通常使用的名称。
+// 中文：如果确实需要查看数字形式的寄存器名称，可为 objdump 添加 `-Mnumeric` 参数。
+
+.Registers of the RV32I. Based on RISC-V documentation and Patterson and Waterman "The RISC-V Reader" (2017)
+// 中文：表：RV32I 的寄存器。
+// 中文：依据 RISC-V 文档及 Patterson 和 Waterman 的《The RISC-V Reader》（2017）。
+[%autowidth]
+|===
+|*Register*  | *ABI*       | *Use by convention*                   | *Preserved?*
+// 中文：表头：寄存器；ABI 名称；约定用途；是否在函数调用前后保持不变。
+|x0          | zero        | hardwired to 0, ignores writes        | _n/a_
+// 中文：x0（zero）：硬连线为 0，忽略写入；调用前后保持不变：不适用。
+|x1          | ra          | return address for jumps              | no
+// 中文：x1（ra）：跳转的返回地址；调用前后保持不变：否。
+|x2          | sp          | stack pointer                         | yes
+// 中文：x2（sp）：栈指针；调用前后保持不变：是。
+|x3          | gp          | global pointer                        | _n/a_
+// 中文：x3（gp）：全局指针；调用前后保持不变：不适用。
+|x4          | tp          | thread pointer                        | _n/a_
+// 中文：x4（tp）：线程指针；调用前后保持不变：不适用。
+|x5          | t0          | temporary register 0                  | no
+// 中文：x5（t0）：临时寄存器 0；调用前后保持不变：否。
+|x6          | t1          | temporary register 1                  | no
+// 中文：x6（t1）：临时寄存器 1；调用前后保持不变：否。
+|x7          | t2          | temporary register 2                  | no
+// 中文：x7（t2）：临时寄存器 2；调用前后保持不变：否。
+|x8          | s0 _or_ fp  | saved register 0 _or_ frame pointer   | yes
+// 中文：x8（s0 或 fp）：保存寄存器 0 或帧指针；调用前后保持不变：是。
+|x9          | s1          | saved register 1                      | yes
+// 中文：x9（s1）：保存寄存器 1；调用前后保持不变：是。
+|x10         | a0          | return value _or_ function argument 0 | no
+// 中文：x10（a0）：返回值或函数参数 0；调用前后保持不变：否。
+|x11         | a1          | return value _or_ function argument 1 | no
+// 中文：x11（a1）：返回值或函数参数 1；调用前后保持不变：否。
+|x12         | a2          | function argument 2                   | no
+// 中文：x12（a2）：函数参数 2；调用前后保持不变：否。
+|x13         | a3          | function argument 3                   | no
+// 中文：x13（a3）：函数参数 3；调用前后保持不变：否。
+|x14         | a4          | function argument 4                   | no
+// 中文：x14（a4）：函数参数 4；调用前后保持不变：否。
+|x15         | a5          | function argument 5                   | no
+// 中文：x15（a5）：函数参数 5；调用前后保持不变：否。
+|x16         | a6          | function argument 6                   | no
+// 中文：x16（a6）：函数参数 6；调用前后保持不变：否。
+|x17         | a7          | function argument 7                   | no
+// 中文：x17（a7）：函数参数 7；调用前后保持不变：否。
+|x18         | s2          | saved register 2                      | yes
+// 中文：x18（s2）：保存寄存器 2；调用前后保持不变：是。
+|x19         | s3          | saved register 3                      | yes
+// 中文：x19（s3）：保存寄存器 3；调用前后保持不变：是。
+|x20         | s4          | saved register 4                      | yes
+// 中文：x20（s4）：保存寄存器 4；调用前后保持不变：是。
+|x21         | s5          | saved register 5                      | yes
+// 中文：x21（s5）：保存寄存器 5；调用前后保持不变：是。
+|x22         | s6          | saved register 6                      | yes
+// 中文：x22（s6）：保存寄存器 6；调用前后保持不变：是。
+|x23         | s7          | saved register 7                      | yes
+// 中文：x23（s7）：保存寄存器 7；调用前后保持不变：是。
+|x24         | s8          | saved register 8                      | yes
+// 中文：x24（s8）：保存寄存器 8；调用前后保持不变：是。
+|x25         | s9          | saved register 9                      | yes
+// 中文：x25（s9）：保存寄存器 9；调用前后保持不变：是。
+|x26         | s10         | saved register 10                     | yes
+// 中文：x26（s10）：保存寄存器 10；调用前后保持不变：是。
+|x27         | s11         | saved register 11                     | yes
+// 中文：x27（s11）：保存寄存器 11；调用前后保持不变：是。
+|x28         | t3          | temporary register 3                  | no
+// 中文：x28（t3）：临时寄存器 3；调用前后保持不变：否。
+|x29         | t4          | temporary register 4                  | no
+// 中文：x29（t4）：临时寄存器 4；调用前后保持不变：否。
+|x30         | t5          | temporary register 5                  | no
+// 中文：x30（t5）：临时寄存器 5；调用前后保持不变：否。
+|x31         | t6          | temporary register 6                  | no
+// 中文：x31（t6）：临时寄存器 6；调用前后保持不变：否。
+|pc          | _(none)_    | program counter                       | _n/a_
+// 中文：pc（无）：程序计数器；调用前后保持不变：不适用。
+|===
+As a general rule, the *saved registers* `s0` to `s11` are preserved across
+function calls, while the *argument registers* `a0` to `a7` and the
+*temporary registers* `t0` to `t6` are not.  The use of the various
+specialized registers such as `sp` by convention will be discussed later in more
+detail.
+// 中文：一般而言，保存寄存器 `s0` 到 `s11` 的值需要在函数调用前后保持不变，而参数寄存器 `a0` 到 `a7` 和临时寄存器 `t0` 到 `t6` 不作此保证。
+// 中文：后文将更详细地讨论 `sp` 等具有约定用途的寄存器。
+
+=== Control registers
+// 中文：控制寄存器
+
+(TBA)
+// 中文：（待补充。）
+
+=== Floating Point registers (F extension)
+// 中文：浮点寄存器（F 扩展）
+
+The F extension adds 32 floating point registers, named `f0` to `f31`, each 32
+bits wide. The D extension widens the 32 registers to 64 bits. The Q extension
+widens the 32 registers to 128 bits.
+// 中文：F 扩展增加了 32 个浮点寄存器，名称为 `f0` 到 `f31`，每个宽 32 位。
+// 中文：D 扩展将这 32 个寄存器加宽到 64 位，Q 扩展则将它们加宽到 128 位。
+
+Like the general registers, the floating point registers are given standardized
+names as part of the RISC-V *application binary interface* (ABI).
+// 中文：与通用寄存器一样，浮点寄存器也具有标准名称，这些名称是 RISC-V 应用程序二进制接口（ABI）的一部分。
+
+[%autowidth]
+|===
+|*Register*  | *ABI*       | *Use by convention*                   | *Preserved?*
+// 中文：表头：寄存器；ABI 名称；约定用途；是否在函数调用前后保持不变。
+|f0          | ft0         | temporary register 0                  | no
+// 中文：f0（ft0）：临时寄存器 0；调用前后保持不变：否。
+|f1          | ft1         | temporary register 1                  | no
+// 中文：f1（ft1）：临时寄存器 1；调用前后保持不变：否。
+|f2          | ft2         | temporary register 2                  | no
+// 中文：f2（ft2）：临时寄存器 2；调用前后保持不变：否。
+|f3          | ft3         | temporary register 3                  | no
+// 中文：f3（ft3）：临时寄存器 3；调用前后保持不变：否。
+|f4          | ft4         | temporary register 4                  | no
+// 中文：f4（ft4）：临时寄存器 4；调用前后保持不变：否。
+|f5          | ft5         | temporary register 5                  | no
+// 中文：f5（ft5）：临时寄存器 5；调用前后保持不变：否。
+|f6          | ft6         | temporary register 6                  | no
+// 中文：f6（ft6）：临时寄存器 6；调用前后保持不变：否。
+|f7          | ft7         | temporary register 7                  | no
+// 中文：f7（ft7）：临时寄存器 7；调用前后保持不变：否。
+|f8          | fs0         | saved register 0                      | yes
+// 中文：f8（fs0）：保存寄存器 0；调用前后保持不变：是。
+|f9          | fs1         | saved register 1                      | yes
+// 中文：f9（fs1）：保存寄存器 1；调用前后保持不变：是。
+|f10         | fa0         | return value _or_ function argument 0 | no
+// 中文：f10（fa0）：返回值或函数参数 0；调用前后保持不变：否。
+|f11         | fa1         | return value _or_ function argument 1 | no
+// 中文：f11（fa1）：返回值或函数参数 1；调用前后保持不变：否。
+|f12         | fa2         | function argument 2                   | no
+// 中文：f12（fa2）：函数参数 2；调用前后保持不变：否。
+|f13         | fa3         | function argument 3                   | no
+// 中文：f13（fa3）：函数参数 3；调用前后保持不变：否。
+|f14         | fa4         | function argument 4                   | no
+// 中文：f14（fa4）：函数参数 4；调用前后保持不变：否。
+|f15         | fa5         | function argument 5                   | no
+// 中文：f15（fa5）：函数参数 5；调用前后保持不变：否。
+|f16         | fa6         | function argument 6                   | no
+// 中文：f16（fa6）：函数参数 6；调用前后保持不变：否。
+|f17         | fa7         | function argument 7                   | no
+// 中文：f17（fa7）：函数参数 7；调用前后保持不变：否。
+|f18         | fs2         | saved register 2                      | yes
+// 中文：f18（fs2）：保存寄存器 2；调用前后保持不变：是。
+|f19         | fs3         | saved register 3                      | yes
+// 中文：f19（fs3）：保存寄存器 3；调用前后保持不变：是。
+|f20         | fs4         | saved register 4                      | yes
+// 中文：f20（fs4）：保存寄存器 4；调用前后保持不变：是。
+|f21         | fs5         | saved register 5                      | yes
+// 中文：f21（fs5）：保存寄存器 5；调用前后保持不变：是。
+|f22         | fs6         | saved register 6                      | yes
+// 中文：f22（fs6）：保存寄存器 6；调用前后保持不变：是。
+|f23         | fs7         | saved register 7                      | yes
+// 中文：f23（fs7）：保存寄存器 7；调用前后保持不变：是。
+|f24         | fs8         | saved register 8                      | yes
+// 中文：f24（fs8）：保存寄存器 8；调用前后保持不变：是。
+|f25         | fs9         | saved register 9                      | yes
+// 中文：f25（fs9）：保存寄存器 9；调用前后保持不变：是。
+|f26         | fs10        | saved register 10                     | yes
+// 中文：f26（fs10）：保存寄存器 10；调用前后保持不变：是。
+|f27         | fs11        | saved register 11                     | yes
+// 中文：f27（fs11）：保存寄存器 11；调用前后保持不变：是。
+|f28         | ft8         | temporary register 8                  | no
+// 中文：f28（ft8）：临时寄存器 8；调用前后保持不变：否。
+|f29         | ft9         | temporary register 9                  | no
+// 中文：f29（ft9）：临时寄存器 9；调用前后保持不变：否。
+|f30         | ft10        | temporary register 10                 | no
+// 中文：f30（ft10）：临时寄存器 10；调用前后保持不变：否。
+|f31         | ft11        | temporary register 11                 | no
+// 中文：f31（ft11）：临时寄存器 11；调用前后保持不变：否。
+|===
+Floating-point values in *saved registers* are only preserved across calls if
+they are no larger than the width of a floating-point register in the targeted
+ABI. These registers can be considered temporaries if targeting the base integer
+calling convention.
+// 中文：只有当浮点值的位宽不超过目标 ABI 的浮点寄存器宽度时，保存寄存器中的这些值才保证在函数调用前后保持不变。
+// 中文：如果采用基础整数调用约定，则可以将这些浮点寄存器视为临时寄存器。
+
+=== Vector registers (RV32V)
+// 中文：向量寄存器（RV32V）
+
+(TBA)
+// 中文：（待补充。）
+
+== Addressing
+// 中文：寻址
+
+Addressing formats like %pcrel_lo().  We can just link to the RISC-V PS ABI
+document to describe what the relocations actually do.
+// 中文：寻址格式，例如 %pcrel_lo()。
+// 中文：关于重定位实际执行的操作，可以直接链接到 RISC-V 处理器专用 ABI（psABI）文档进行说明。
+
+== Instruction Set
+// 中文：指令集
+
+Official Specifications webpage: +
+// 中文：官方规范网页：
+
+- https://riscv.org/specifications/
+
+Latest Specifications draft repository: +
+// 中文：最新规范草案仓库：
+
+- https://github.com/riscv/riscv-isa-manual
+
+=== Instructions
+// 中文：指令
+
+== RISC-V ISA Specifications: +
+// 中文：RISC-V 指令集架构规范：
+
+- https://riscv.org/specifications/
+
+=== Instruction Aliases
+// 中文：指令别名
+
+ALIAS line from opcodes/riscv-opc.c
+// 中文：来自 opcodes/riscv-opc.c 的 ALIAS 条目。
+
+To better diagnose situations where the program flow reaches an unexpected
+location, you might want to emit there an instruction that's known to trap. You
+can use an `UNIMP` pseudoinstruction, which should trap in nearly all systems.
+The *de facto* standard implementation of this instruction is:
+// 中文：为了更好地诊断程序执行流程到达意外位置的情况，可以在该位置输出一条已知会触发陷阱的指令。
+// 中文：可使用 `UNIMP` 伪指令，它应当在几乎所有系统上触发陷阱。
+// 中文：这条指令事实上的标准实现如下：
+
+- `C.UNIMP`: `0000`. The all-zeroes pattern is not a valid instruction. Any
+  system which traps on invalid instructions will thus trap on this `UNIMP`
+  instruction form. Despite not being a valid instruction, it still fits the
+  16-bit (compressed) instruction format, and so `0000 0000` is interpreted as
+  being two 16-bit `UNIMP` instructions.
+// 中文：`C.UNIMP`：`0000`。
+// 中文：全零位模式不是有效指令，因此任何会对无效指令触发陷阱的系统，也会对这种 `UNIMP` 形式触发陷阱。
+// 中文：尽管它不是有效指令，其编码仍符合 16 位压缩指令的长度格式，所以 `0000 0000` 会被解释为两条 16 位 `UNIMP` 指令。
+
+- `UNIMP` : `C0001073`. This is an alias for `CSRRW x0, cycle, x0`. Since
+  `cycle` is a read-only CSR, then (whether this CSR exists or not) an attempt
+  to write into it will generate an illegal instruction exception. This 32-bit
+  form of `UNIMP` is emitted when targeting a system without the C extension,
+  or when the `.option norvc` directive is used.
+// 中文：`UNIMP`：`C0001073`，是 `CSRRW x0, cycle, x0` 的别名。
+// 中文：由于 `cycle` 是只读 CSR，无论该 CSR 是否存在，尝试写入它都会产生非法指令异常。
+// 中文：当目标系统不支持 C 扩展，或使用了 `.option norvc` 指令时，会输出这种 32 位形式的 `UNIMP`。
+
+=== Pseudo Ops
+// 中文：汇编伪操作（汇编器指令）
+
+Both the RISC-V-specific and GNU .-prefixed options.
+// 中文：包括 RISC-V 专用选项以及 GNU 中以点号（.）开头的选项。
+
+The following table lists assembler directives:
+// 中文：下表列出了汇编器指令：
+
+.Assembler Directives
+// 中文：表：汇编器指令。
+[cols="20,40,40"]
+|===
+|*Directive*  | *Arguments*                    | *Description*
+// 中文：表头：汇编器指令；参数；说明。
+|.align       | integer                        | align to power of 2 (alias for `.p2align` which is preferred - see <<.align, .align>>
+// 中文：`.align`：参数为整数；按 2 的幂次对齐。
+// 中文：它是 `.p2align` 的别名，建议优先使用 `.p2align`，详见 `.align` 一节。
+|.p2align     | p2,[pad_val=0],max             | align to power of 2
+// 中文：`.p2align`：参数为 p2、可选填充值 pad_val（默认为 0）及最大填充量 max；按 2 的幂次对齐。
+|.balign      | b,[pad_val=0]                  | byte align
+// 中文：`.balign`：参数为字节数 b 和可选填充值 pad_val（默认为 0）；按指定字节数对齐。
+|.file        | "filename"                     | emit filename FILE LOCAL symbol table
+// 中文：`.file`：参数为文件名字符串；将文件名写入符号表，类型为 FILE，绑定为 LOCAL。
+|.globl       | symbol_name                    | emit symbol_name to symbol table (scope GLOBAL)
+// 中文：`.globl`：参数为符号名；将符号写入符号表，作用域为 GLOBAL（全局）。
+|.local       | symbol_name                    | emit symbol_name to symbol table (scope LOCAL)
+// 中文：`.local`：参数为符号名；将符号写入符号表，作用域为 LOCAL（局部）。
+|.comm        | symbol_name,size,align         | emit common object to .bss section
+// 中文：`.comm`：参数为符号名、大小和对齐要求；在 .bss 节中生成公共对象。
+|.common      | symbol_name,size,align         | emit common object to .bss section
+// 中文：`.common`：参数为符号名、大小和对齐要求；在 .bss 节中生成公共对象。
+|.ident       | "string"                       | accepted for source compatibility
+// 中文：`.ident`：参数为字符串；出于源代码兼容性而接受此指令。
+|.section     | [{.text,.data,.rodata,.bss}]   | emit section (if not present, default .text) and make current
+// 中文：`.section`：参数可为 .text、.data、.rodata、.bss 等节名；创建该节（如果不存在），并将其设为当前节；默认节为 .text。
+|.size        | symbol, symbol                 | accepted for source compatibility
+// 中文：`.size`：参数为符号及符号表达式；原表说明为“出于源代码兼容性而接受此指令”。
+|.text        |                                | emit .text section (if not present) and make current
+// 中文：`.text`：创建 .text 节（如果不存在），并将其设为当前节。
+|.data        |                                | emit .data section (if not present) and make current
+// 中文：`.data`：创建 .data 节（如果不存在），并将其设为当前节。
+|.rodata      |                                | emit .rodata section (if not present) and make current
+// 中文：`.rodata`：创建 .rodata 节（如果不存在），并将其设为当前节。
+|.bss         |                                | emit .bss section (if not present) and make current
+// 中文：`.bss`：创建 .bss 节（如果不存在），并将其设为当前节。
+|.string      | "string"                       | emit string
+// 中文：`.string`：参数为字符串；输出该字符串。
+|.asciz       | "string"                       | emit string (alias for .string)
+// 中文：`.asciz`：参数为字符串；输出该字符串，是 .string 的别名。
+|.equ         | name, value                    | constant definition
+// 中文：`.equ`：参数为名称和值；定义常量。
+|.macro       | name arg1 [, argn]             | begin macro definition \argname to substitute
+// 中文：`.macro`：参数为宏名以及 arg1、argn 等形参；开始宏定义，使用反斜杠加形参名（\argname）进行替换。
+|.endm        |                                | end macro definition
+// 中文：`.endm`：结束宏定义。
+|.type        | symbol, @function              | accepted for source compatibility
+// 中文：`.type`：参数为符号及 @function；原表说明为“出于源代码兼容性而接受此指令”。
+|.option      | {arch,rvc,norvc,pic,nopic,relax,norelax,push,pop} | RISC-V options. Refer to <<.option, .option>> for a more detailed description.
+// 中文：`.option`：参数为 arch、rvc、norvc、pic、nopic、relax、norelax、push、pop 之一；设置 RISC-V 选项，详见 `.option` 一节。
+|.byte        | expression [, expression]*     | 8-bit comma separated words
+// 中文：`.byte`：参数为逗号分隔的表达式列表；依次输出 8 位数据。
+|.2byte       | expression [, expression]*     | 16-bit comma separated words
+// 中文：`.2byte`：参数为逗号分隔的表达式列表；依次输出 16 位数据。
+|.half        | expression [, expression]*     | 16-bit comma separated words
+// 中文：`.half`：参数为逗号分隔的表达式列表；依次输出 16 位数据。
+|.short       | expression [, expression]*     | 16-bit comma separated words
+// 中文：`.short`：参数为逗号分隔的表达式列表；依次输出 16 位数据。
+|.4byte       | expression [, expression]*     | 32-bit comma separated words
+// 中文：`.4byte`：参数为逗号分隔的表达式列表；依次输出 32 位数据。
+|.word        | expression [, expression]*     | 32-bit comma separated words
+// 中文：`.word`：参数为逗号分隔的表达式列表；依次输出 32 位数据。
+|.long        | expression [, expression]*     | 32-bit comma separated words
+// 中文：`.long`：参数为逗号分隔的表达式列表；依次输出 32 位数据。
+|.8byte       | expression [, expression]*     | 64-bit comma separated words
+// 中文：`.8byte`：参数为逗号分隔的表达式列表；依次输出 64 位数据。
+|.dword       | expression [, expression]*     | 64-bit comma separated words
+// 中文：`.dword`：参数为逗号分隔的表达式列表；依次输出 64 位数据。
+|.quad        | expression [, expression]*     | 64-bit comma separated words
+// 中文：`.quad`：参数为逗号分隔的表达式列表；依次输出 64 位数据。
+|.float       | expression [, expression]*     | 32-bit floating point values, see <<fp-literal, Floating-point literals>> for the value format.
+// 中文：`.float`：参数为逗号分隔的表达式列表；输出 32 位浮点值，数值格式见“浮点字面量”一节。
+|.double      | expression [, expression]*     | 64-bit floating point values, see <<fp-literal, Floating-point literals>> for the value format.
+// 中文：`.double`：参数为逗号分隔的表达式列表；输出 64 位浮点值，数值格式见“浮点字面量”一节。
+|.quad        | expression [, expression]*     | 128-bit floating point values, see <<fp-literal, Floating-point literals>> for the value format.
+// 中文：`.quad`：参数为逗号分隔的表达式列表；输出 128 位浮点值，数值格式见“浮点字面量”一节。
+|.dtprelword  | expression [, expression]*     | 32-bit thread local word
+// 中文：`.dtprelword`：参数为逗号分隔的表达式列表；输出 32 位线程局部数据字。
+|.dtpreldword | expression [, expression]*     | 64-bit thread local word
+// 中文：`.dtpreldword`：参数为逗号分隔的表达式列表；输出 64 位线程局部数据字。
+|.sleb128     | expression                     | signed little endian base 128, DWARF
+// 中文：`.sleb128`：参数为表达式；使用有符号小端 128 进制编码（SLEB128），用于 DWARF。
+|.uleb128     | expression                     | unsigned little endian base 128, DWARF
+// 中文：`.uleb128`：参数为表达式；使用无符号小端 128 进制编码（ULEB128），用于 DWARF。
+|.zero        | integer                        | zero bytes
+// 中文：`.zero`：参数为整数；输出指定数量的零字节。
+|.variant_cc  | symbol_name                    | annotate the symbol with variant calling convention
+// 中文：`.variant_cc`：参数为符号名；将符号标记为使用变体调用约定。
+|.attribute   | name, value                    | RISC-V object attributes, more detailed description see <<.attribute, .attribute>>.
+// 中文：`.attribute`：参数为名称和值；设置 RISC-V 目标文件属性，详见 `.attribute` 一节。
+| .insn        | see description                | emit a custom instruction encoding, see <<.insn, .insn>>
+// 中文：`.insn`：参数见正文说明；输出自定义指令编码，详见 `.insn` 一节。
+|===
+
+[id=.align]
+== `.align`
+// 中文：`.align`：对齐
+The `.align` directive for RISC-V is an alias to `.p2align`, which aligns to a
+power of two, so `.align 2` means align to 4 bytes. Because the definition of
+the `.align` directive https://sourceware.org/binutils/docs/as/Align.html[varies by architecture],
+it is recommended to use the unambiguous `.p2align` or `.balign` directives
+instead.
+// 中文：RISC-V 的 `.align` 是 `.p2align` 的别名，用于按 2 的幂次对齐，因此 `.align 2` 表示按 4 字节对齐。
+// 中文：由于 `.align` 的定义因架构而异（见原文链接），建议改用含义明确的 `.p2align` 或 `.balign`。
+
+[id=.attribute]
+== `.attribute`
+// 中文：`.attribute`：属性
+
+The `.attribute` directive is used to record information about an object
+file/binary that a linker or runtime loader needs to check for compatibility.
+// 中文：`.attribute` 用于记录目标文件或二进制文件的信息，链接器或运行时加载器需要利用这些信息检查兼容性。
+
+For more information like attribute name, number, value type and description,
+please refer to
+https://github.com/riscv-non-isa/riscv-elf-psabi-doc/blob/master/riscv-elf.adoc#attributes[attribute section in RISC-V psABI].
+// 中文：有关属性名称、编号、值类型和描述的更多信息，请参阅原文链接所指向的 RISC-V psABI 属性章节。
+
+`.attribute` take two arguments. The first argument of `.attribute` is the
+symbolic name of attribute or the attribute number, the prefix `Tag_RISCV_`
+can be omitted, the second argument can be string or number.
+// 中文：`.attribute` 接受两个参数。
+// 中文：第一个参数是属性的符号名称或属性编号，其中 `Tag_RISCV_` 前缀可以省略；第二个参数可以是字符串或数字。
+
+Syntax for `.attribute`:
+// 中文：`.attribute` 的语法：
+[source,asm]
+----
+.attribute <NAME_OR_NUMBER>, <ATTRIBUTE_VALUE>
+
+NAME_OR_NUMBER := <attribute-name>
+                | [1-9][0-9]*
+
+ATTRIBUTE_VALUE := <string>
+                 | <number>
+----
+
+[id=.option]
+== `.option`
+// 中文：`.option`：汇编选项
+
+=== `rvc`/`norvc`
+// 中文：`rvc`/`norvc`：启用／禁用压缩指令扩展
+
+This option will be deprecated soon after `.option arch` has been widely
+implemented on main stream open source toolchains.
+// 中文：当 `.option arch` 在主流开源工具链中得到广泛实现后，这个选项将很快被弃用。
+
+Enable/disable the C-extension for the following code region. This option is
+equivalent to `.option arch, +c`/`.option arch, -c`, but widely supported by
+older toolchain versions.
+// 中文：为后续代码区域启用／禁用 C 扩展。
+// 中文：该选项等价于 `.option arch, +c`／`.option arch, -c`，但在较旧版本的工具链中也得到广泛支持。
+
+Alternative style:
+// 中文：另一种写法：
+
+[source,asm]
+----
+.option push
+.option arch, +c   # Alternative of .option rvc
+.option pop
+
+.option push
+.option arch, -c   # Alternative of .option norvc
+.option pop
+----
+
+NOTE: `.option rvc` might set the ELF flag `EF_RISCV_RVC` in some toolchains. That
+might cause the linker to compress instructions in code regions where that was
+not intended.
+// 中文：注意：在某些工具链中，`.option rvc` 可能会设置 ELF 标志 `EF_RISCV_RVC`，这可能导致链接器在本不希望压缩指令的代码区域执行指令压缩。
+
+NOTE: There is a difference between `.option rvc`/`.option norvc` and
+`.option arch, +c`/`.option arch, -c`. The latter won't set EF_RISCV_RVC in the
+ELF flags.
+// 中文：注意：`.option rvc`／`.option norvc` 与 `.option arch, +c`／`.option arch, -c` 有区别：后者不会设置 ELF 标志中的 EF_RISCV_RVC。
+
+=== `arch`
+// 中文：`arch`：指令集架构选项
+
+Enable and/or disable specific ISA extensions for the following code regions, but
+without changing the arch attribute and `EF_RISCV_RVC` in the ELF flags, that
+means it will not raise the minimal execution environment requirement, so the user
+should take care to the execution of the code regions around
+`.option push`/`.option arch`/`.option pop`.
+// 中文：为后续代码区域启用和／或禁用指定的 ISA 扩展，但不改变 arch 属性，也不改变 ELF 标志中的 `EF_RISCV_RVC`。
+// 中文：这意味着不会提高最低执行环境要求，因此使用者需要注意 `.option push`／`.option arch`／`.option pop` 所包围的代码区域在何种环境下执行。
+
+Syntax for `.option arch`:
+// 中文：`.option arch` 的语法：
+
+[source,asm]
+----
+.option arch, <EXTENSIONS-OR-FULLARCH>
+
+EXTENSIONS-OR-FULLARCH := <EXTENSIONS>
+                        | <FULLARCHSTR>
+
+EXTENSIONS             := <EXTENSION> ',' <EXTENSIONS>
+                        | <EXTENSION>
+
+FULLARCHSTR            := <full-arch-string>
+
+EXTENSION              := <OP> <EXTENSION-NAME> <VERSION>
+
+OP                     := '+'
+                        | '-'
+
+VERSION                := [0-9]+ 'p' [0-9]+
+                        | [1-9][0-9]*
+                        |
+
+EXTENSION-NAME         := Naming rule is defined in RISC-V ISA manual
+----
+
+- Extension version can be omitted, the assembler will use the built-in default
+  version for that extension.
+// 中文：扩展版本可以省略；汇编器会使用该扩展的内置默认版本。
+- `OP` can be enable (`+`) or disable (`-`).
+// 中文：`OP` 可以表示启用（`+`）或禁用（`-`）。
+- Format of `<full-arch-string>` is the same as `-march` option.
+// 中文：`<full-arch-string>` 的格式与 `-march` 选项相同。
+
+Example:
+// 中文：示例：
+
+[source, asm]
+----
+.attribute arch, rv64imafdc
+# You can only use instructions from the i, m, a, f, d and c extensions.
+memcpy_general:
+    add     a5,a1,a2
+    beq     a1,a5,.L2
+    add     a2,a0,a2
+    mv      a5,a0
+.L3:
+    addi    a1,a1,1
+    addi    a5,a5,1
+    lbu     a4,-1(a1)
+    sb      a4,-1(a5)
+    bne     a5,a2,.L3
+.L2:
+    ret
+
+.option push     # Push current options to the stack.
+.option arch, +v # Enable vector extension, we can use any instruction in imafdcv extension.
+memcpy_vec:
+    mv a3, a0
+.Lloop:
+    vsetvli t0, a2, e8, m8, ta, ma
+    vle8.v v0, (a1)
+    add a1, a1, t0
+    sub a2, a2, t0
+    vse8.v v0, (a3)
+    add a3, a3, t0
+    bnez a2, .Lloop
+    ret
+.option pop   # Pop current option from the stack, restore the enabled ISA extension status to imafdc.
+
+.option push     # Push current option to the stack.
+.option arch, -c # Disable compressed extension, we can't use any instruction in extension.
+memcpy_norvc:
+    add     a5,a1,a2
+    beq     a1,a5,.L2
+    add     a2,a0,a2
+    mv      a5,a0
+.L3:
+    addi    a1,a1,1
+    addi    a5,a5,1
+    lbu     a4,-1(a1)
+    sb      a4,-1(a5)
+    bne     a5,a2,.L3
+.L2:
+    ret
+.option pop   # Pop current option from the stack, restore the enabled ISA extension status to imafdc.
+
+.option push  # Push current option to the stack.
+.option arch, rv64imc # Set arch to rv64imc.
+    nop
+.option pop   # Pop current option from the stack, restore the enabled ISA extension status to imafdc.
+----
+
+NOTE: A typical use case is with `ifunc`, e.g. the C library is built with
+`rv64gc`, but a few functions like memcpy provide two versions, one built with
+`rv64gc` and one built with `rv64gcv`, and then select between them by ifunc
+mechanism at run-time.  However, we don't want to change the minimal execution
+environment requirement to `rv64gcv`, since the `rv64gcv` version will be
+invoked only if the execution environment supports the vector extension, so
+the minimal execution environment requirement still is `rv64gc`.
+// 中文：注意：典型用途是配合 `ifunc`。
+// 中文：例如，C 库按 `rv64gc` 构建，但 memcpy 等少数函数提供两个版本，分别按 `rv64gc` 和 `rv64gcv` 构建，再由 ifunc 机制在运行时选择版本。
+// 中文：此时不希望将最低执行环境要求改成 `rv64gcv`，因为只有当执行环境支持向量扩展时才会调用 `rv64gcv` 版本，所以最低执行环境要求仍为 `rv64gc`。
+
+NOTE: `.option arch, +` will also enable all required extensions, for example,
+`rv32i` + `.option arch, +v` will also enable `f`, `d`, `zve32x`, `zve32f`,
+`zve64x`, `zve64f`, `zve64d`, `zvl32b`, `zvl64b` and `zvl128b` extensions.
+// 中文：注意：`.option arch, +` 还会启用所有必需的扩展。
+// 中文：例如，在 `rv32i` 上使用 `.option arch, +v`，还会启用 `f`、`d`、`zve32x`、`zve32f`、`zve64x`、`zve64f`、`zve64d`、`zvl32b`、`zvl64b` 和 `zvl128b` 扩展。
+
+NOTE: We recommend `.option arch, +` and `.option arch, -` are used with
+`.option push`/`.option pop` instead of a `.option arch, +` / `.option arch, -`
+pair, because `.option arch, +` will enable all required extensions, but
+`.option arch, -` only disables the specific extension, so the result might be
+unexpected, for example: `rv32i` + `.option arch, +v` + `.option arch, -v`
+will result `rv32ifd_zve32x_zve32f_zve64x_zve64f_zve64d_zvl32b_zvl64b_zvl128b`
+not `rv32i`.
+Another example is `.option arch, rv64ifd` + `.option arch, -f`, which results
+in `rv64ifd`, because `f` will be added back when adding the implied extensions
+of `d`.
+// 中文：注意：建议将 `.option arch, +` 和 `.option arch, -` 与 `.option push`／`.option pop` 配合使用，而不是简单地成对使用前两者。
+// 中文：原因是 `.option arch, +` 会启用所有必需的扩展，而 `.option arch, -` 只禁用指定扩展，因此结果可能与预期不同。
+// 中文：例如，`rv32i` + `.option arch, +v` + `.option arch, -v` 的结果是 `rv32ifd_zve32x_zve32f_zve64x_zve64f_zve64d_zvl32b_zvl64b_zvl128b`，而不是 `rv32i`。
+// 中文：另一个例子是 `.option arch, rv64ifd` + `.option arch, -f`，结果仍为 `rv64ifd`，因为添加 `d` 隐含依赖的扩展时，`f` 会被重新加入。
+
+NOTE: `.option arch, +<ext>, -<ext>` is accepted and will result in enabling the
+extensions that depend on `ext`, e.g. `rv32i` + `.option arch, +v, -v` will result
+`rv32ifd_zve32x_zve32f_zve64x_zve64f_zve64d_zvl32b_zvl64b_zvl128b`.
+// 中文：注意：允许使用 `.option arch, +<ext>, -<ext>`，其结果会保留启用 `ext` 时引入的依赖扩展。
+// 中文：例如，`rv32i` + `.option arch, +v, -v` 的结果是 `rv32ifd_zve32x_zve32f_zve64x_zve64f_zve64d_zvl32b_zvl64b_zvl128b`。
+
+=== `pic`/`nopic`
+// 中文：`pic`/`nopic`：位置无关／位置相关代码
+
+Set the code model to PIC (position independent code) or non-PIC. This will
+affect the expansion of the `la` pseudoinstruction, refer to
+<<pseudoinstructions, listing of standard RISC-V pseudoinstructions>>.
+// 中文：将代码模型设置为 PIC（位置无关代码）或非 PIC。
+// 中文：这会影响 `la` 伪指令的展开方式，参见“标准 RISC-V 伪指令一览”。
+
+=== `relax`/`norelax`
+// 中文：`relax`/`norelax`：启用／禁用链接器松弛优化
+
+Enable/disable linker relaxation for the following code region.
+// 中文：为后续代码区域启用／禁用链接器松弛优化（linker relaxation）。
+
+NOTE: A code region followed by `.option relax` will emit
+`R_RISCV_RELAX`/`R_RISCV_ALIGN` even if the linker does not support relaxation.
+The suggested usage is using `.option norelax` with `.option push`/`.option pop`
+if linker relaxation should be disabled for a code region.
+// 中文：注意：使用 `.option relax` 的代码区域即使面对不支持松弛优化的链接器，也会生成 `R_RISCV_RELAX`／`R_RISCV_ALIGN` 重定位。
+// 中文：如果要对某段代码禁用链接器松弛优化，建议将 `.option norelax` 与 `.option push`／`.option pop` 配合使用。
+
+NOTE: Recommended way to disable linker relaxation of specific code region is
+use `.option push`, `.option norelax` and `.option pop`, that prevent enabled
+linker relaxation accidentally if user already disable linker relaxation.
+// 中文：注意：推荐使用 `.option push`、`.option norelax` 和 `.option pop` 来禁用指定代码区域的链接器松弛优化。
+// 中文：这样可以避免在用户原本已禁用松弛优化的情况下，意外将其重新启用。
+
+=== `push`/`pop`
+// 中文：`push`/`pop`：保存／恢复当前选项
+
+Push/pop current options to/from the options stack.
+// 中文：将当前选项压入选项栈，或从选项栈弹出并恢复选项。
+
+[id=.insn]
+== `.insn`
+// 中文：`.insn`：输出指令编码
+
+Emit an arbitrary instruction. This is useful for custom instructions or for
+very new instructions which an assembler may not support.
+// 中文：输出任意指令。
+// 中文：这对自定义指令，或汇编器可能尚不支持的新指令很有用。
+
+There are three overloads:
+// 中文：有三种重载形式：
+
+* `.insn <value>` - emit a raw instruction with the given value
+// 中文：`.insn <value>`：输出由给定数值表示的原始指令。
+* `.insn <insn_length>, <value>` - the same, but also verify that the instruction length has the given value in bytes
+// 中文：`.insn <insn_length>, <value>`：与上一种相同，但还会验证指令的字节长度是否等于给定值。
+* `.insn <type> <fields>`
+// 中文：`.insn <type> <fields>`：按指定指令类型和字段输出指令。
+
+<type> is the instruction type (e.g. r, i, s, cj, ...).
+These types are specified in the RISC-V ISA specification.
+// 中文：`<type>` 表示指令类型，例如 r、i、s、cj 等。
+// 中文：这些类型在 RISC-V ISA 规范中定义。
+
+<fields> is a comma-separated list of the instruction fields.
+The order of the fields is achieved by grouping them and listing
+them from LSB to MSB. The groups are:
+// 中文：`<fields>` 是以逗号分隔的指令字段列表。
+// 中文：字段先分组，再在各组内按从最低有效位（LSB）到最高有效位（MSB）的顺序列出。
+// 中文：分组如下：
+
+* opcode fields
+// 中文：操作码字段。
+* function fields
+// 中文：功能字段。
+* register fields
+// 中文：寄存器字段。
+* immediates and symbols
+// 中文：立即数和符号。
+
+E.g. an instruction with the fields (sorted from LSB to MSB):
+// 中文：例如，某条指令的字段按从 LSB 到 MSB 的顺序排列如下：
+
+  opcode7, rd, func3, rs1, rs2, func7
+
+Gets listed as follows:
+// 中文：在 `.insn` 中应按如下顺序列出：
+
+  opcode7, func3, func7, rd, rs1, rs2
+
+For more examples, refer to the
+https://sourceware.org/binutils/docs/as/RISC_002dV_002dFormats.html[Binutils documentation].
+// 中文：更多示例请参阅原文链接所指向的 Binutils 文档。
+
+== Assembler Relocation Functions
+// 中文：汇编器重定位函数
+
+The following table lists assembler relocation expansions:
+// 中文：下表列出了汇编器重定位表达式的展开含义：
+
+.Assembler Relocation Functions
+// 中文：表：汇编器重定位函数。
+[%autowidth]
+|===
+|*Assembler Notation*        | *Description*                  | *Instruction/Macro*
+// 中文：表头：汇编器记法；说明；指令／宏。
+|%hi(symbol)                 | Absolute (HI20)                | lui
+// 中文：%hi(symbol)：绝对地址的高 20 位（HI20），用于 lui。
+|%lo(symbol)                 | Absolute (LO12)                | load, store, add
+// 中文：%lo(symbol)：绝对地址的低 12 位（LO12），用于加载、存储和加法指令。
+|%pcrel_hi(symbol)           | PC-relative (HI20)             | auipc
+// 中文：%pcrel_hi(symbol)：PC 相对地址的高 20 位（HI20），用于 auipc。
+|%pcrel_lo(label)            | PC-relative (LO12)             | load, store, add
+// 中文：%pcrel_lo(label)：PC 相对地址的低 12 位（LO12），用于加载、存储和加法指令。
+|%tprel_hi(symbol)           | TLS LE "Local Exec"            | lui
+// 中文：%tprel_hi(symbol)：线程局部存储（TLS）的本地执行模型（LE，Local Exec），用于 lui。
+|%tprel_lo(symbol)           | TLS LE "Local Exec"            | load, store, add
+// 中文：%tprel_lo(symbol)：TLS 本地执行模型（LE），用于加载、存储和加法指令。
+|%tprel_add(symbol)          | TLS LE "Local Exec"            | add
+// 中文：%tprel_add(symbol)：TLS 本地执行模型（LE），用于 add。
+|%tls_ie_pcrel_hi(symbol) {asterisk}  | TLS IE "Initial Exec" (HI20)   | auipc
+// 中文：%tls_ie_pcrel_hi(symbol)：TLS 初始执行模型（IE，Initial Exec）的高 20 位（HI20），用于 auipc；带星号。
+|%tls_gd_pcrel_hi(symbol) {asterisk}  | TLS GD "Global Dynamic" (HI20) | auipc
+// 中文：%tls_gd_pcrel_hi(symbol)：TLS 全局动态模型（GD，Global Dynamic）的高 20 位（HI20），用于 auipc；带星号。
+|%got_pcrel_hi(symbol) {asterisk}     | GOT PC-relative (HI20)         | auipc
+// 中文：%got_pcrel_hi(symbol)：GOT 的 PC 相对地址高 20 位（HI20），用于 auipc；带星号。
+|===
+
+{asterisk} These reuse %pcrel_lo(label) for their lower half
+// 中文：星号说明：这些表达式的低位部分复用 %pcrel_lo(label)。
+
+== Labels
+// 中文：标签
+
+Text labels are used as branch, unconditional jump targets and symbol offsets.
+Text labels are added to the symbol table of the compiled module.
+// 中文：文本标签用作分支、无条件跳转的目标以及符号偏移的基准。
+// 中文：文本标签会被加入已编译模块的符号表。
+
+[source, asm]
+----
+loop:
+        j loop
+----
+
+Numeric labels are used for local references. References to local labels are
+suffixed with 'f' for a forward reference or 'b' for a backwards reference.
+// 中文：数字标签用于局部引用。
+// 中文：引用局部标签时，后缀 f 表示向前引用后面出现的标签，后缀 b 表示向后引用前面出现的标签。
+
+[source, asm]
+----
+1:
+        j 1b
+----
+
+== Absolute addressing
+// 中文：绝对寻址
+
+The following example shows how to load an absolute address:
+// 中文：下面的示例展示如何加载绝对地址：
+
+[source, asm]
+----
+  lui a0, %hi(msg + 1)
+  addi  a0, a0, %lo(msg + 1)
+----
+
+Which generates the following assembler output and relocations
+as seen by `objdump`:
+// 中文：它会生成如下汇编输出和重定位信息，可通过 `objdump` 查看：
+
+
+[source, asm]
+----
+0000000000000000 <.text>:
+   0: 00000537            lui a0,0x0
+      0: R_RISCV_HI20 msg+0x1
+   4: 00150513            addi  a0,a0,1 # 0x1
+      4: R_RISCV_LO12_I msg+0x1
+----
+
+== Relative addressing
+// 中文：相对寻址
+
+The following example shows how to load a PC-relative address:
+// 中文：下面的示例展示如何加载相对于 PC 的地址：
+
+[source, asm]
+----
+1:
+  auipc a0, %pcrel_hi(msg + 1)
+  addi  a0, a0, %pcrel_lo(1b)
+----
+
+Which generates the following assembler output and relocations
+as seen by `objdump`:
+// 中文：它会生成如下汇编输出和重定位信息，可通过 `objdump` 查看：
+
+[source, asm]
+----
+0000000000000000 <.text>:
+   0: 00000517            auipc a0,0x0
+      0: R_RISCV_PCREL_HI20 msg+0x1
+   4: 00050513            mv  a0,a0
+      4: R_RISCV_PCREL_LO12_I .L1
+----
+
+== GOT-indirect addressing
+// 中文：通过 GOT（全局偏移表）间接寻址
+
+The following example shows how to load an address from the GOT:
+// 中文：下面的示例展示如何从 GOT（全局偏移表）加载地址：
+
+[source, asm]
+----
+1:
+  auipc a0, %got_pcrel_hi(msg + 1)
+  ld  a0, %pcrel_lo(1b)(a0)
+----
+
+This generates the following instructions and relocations as seen by `objdump`
+(for RV64; RV32 will use `lw` instead of `ld`):
+// 中文：它会生成如下指令和重定位信息，可通过 `objdump` 查看（这里针对 RV64；RV32 会使用 `lw` 而不是 `ld`）：
+
+[source, asm]
+----
+0000000000000000 <.text>:
+   0: 00000517            auipc a0,0x0
+      0: R_RISCV_GOT_HI20 msg+0x1
+   4: 00053503            ld  a0,0(a0) # 0 <.text>
+      4: R_RISCV_PCREL_LO12_I .L1
+----
+
+== Load Immediate
+// 中文：加载立即数
+
+The following example shows the `li` pseudoinstruction which
+is used to load immediate values:
+// 中文：下面的示例展示用于加载立即数的 `li` 伪指令：
+
+[source, asm]
+----
+  .equ  CONSTANT, 0xdeadbeef
+
+  li  a0, CONSTANT
+----
+
+Which, for RV32I, generates the following assembler output, as seen by `objdump`:
+// 中文：在 RV32I 上，它会生成如下汇编输出，可通过 `objdump` 查看：
+
+[source, asm]
+----
+00000000 <.text>:
+   0: deadc537            lui a0,0xdeadc
+   4: eef50513            addi  a0,a0,-273 # deadbeef <CONSTANT+0x0>
+----
+
+
+== Load Upper Immediate's Immediate
+// 中文：加载高位立即数指令的立即数参数
+
+The immediate argument to `lui` is an integer in the interval [0x0, 0xfffff].
+Its compressed form, `c.lui`, accepts only those in the subintervals [0x1, 0x1f] and [0xfffe0, 0xfffff].
+// 中文：`lui` 的立即数参数是区间 [0x0, 0xfffff] 内的整数。
+// 中文：其压缩形式 `c.lui` 只接受子区间 [0x1, 0x1f] 和 [0xfffe0, 0xfffff] 内的整数。
+
+== Signed Immediates for I- and S-Type Instructions
+// 中文：I 型和 S 型指令的有符号立即数
+
+All I- and S-type instructions with 12-bit signed immediates
+--- e.g., `addi` but not `slli` ---
+accept their immediate argument as an integer in the interval [-2048, 2047].
+Integers in the subinterval [-2048, -1] can also be passed by their (unsigned) associates
+in the interval [0xfffff800, 0xffffffff] on RV32I, and
+in [0xfffffffffffff800, 0xffffffffffffffff] on both RV32I and RV64I.
+// 中文：所有使用 12 位有符号立即数的 I 型和 S 型指令（例如 `addi`，但不包括 `slli`），都接受区间 [-2048, 2047] 内的整数作为立即数参数。
+// 中文：对于子区间 [-2048, -1] 内的整数，也可以使用其对应的无符号表示：RV32I 可使用 [0xfffff800, 0xffffffff] 范围内的值；RV32I 和 RV64I 均可使用 [0xfffffffffffff800, 0xffffffffffffffff] 范围内的值。
+
+[id=fp-literal]
+== Floating-point literals
+// 中文：浮点字面量
+
+The assembler supports the same floating-point literal formats as those defined
+in the C and C++ standards (i.e., decimal floating-point literals with decimal
+exponents as well as hexadecimal floating-point literals with binary exponents).
+// 中文：汇编器支持与 C 和 C++ 标准相同的浮点字面量格式，即使用十进制指数的十进制浮点字面量，以及使用二进制指数的十六进制浮点字面量。
+
+Here are some examples:
+// 中文：以下是一些示例：
+
+- 3.14159
+
+- 0.271828e1
+
+- 0x0.3p-4
+
+NOTE: The detailed format of the floating point immediate value can be
+referenced on https://en.cppreference.com/w/cpp/language/floating_literal[this page].
+// 中文：注意：浮点立即数的详细格式可参阅原文链接所指向的 cppreference 浮点字面量页面。
+
+== Load Floating-point Immediate
+// 中文：加载浮点立即数
+
+The `Zfa` extension introduces `fli.{h|s|d|q}` instructions for loading a specific
+set of floating-point immediates, supported values can be found in the
+RISC-V ISA specification but are also listed below.
+// 中文：`Zfa` 扩展引入了 `fli.{h|s|d|q}` 指令，用于加载一个特定集合中的浮点立即数。
+// 中文：支持的数值可在 RISC-V ISA 规范中查到，下文也列出了这些数值。
+
+The `fli` instruction is used to load a floating point immediate into a floating
+register, the accepted immediate is defined in <<fp-literal, Floating-point literals>>
+and the reference table can be found in <<fli-operand-value, FLI operands reference table>>.
+// 中文：`fli` 指令用于将浮点立即数加载到浮点寄存器中。
+// 中文：可接受的立即数写法见“浮点字面量”一节，具体数值见“FLI 操作数参考表”。
+
+[source, asm]
+----
+  fli.s fa0, 0x1p-15
+  fli.s fa1, 0.00390625
+  fli.s fa2, 6.25e-02
+----
+
+The tool should reject any value that does not exactly match a floating-point
+immediate operand for the 'fli' instruction.
+// 中文：对于不能与 `fli` 指令某个浮点立即数操作数精确匹配的数值，工具应当拒绝接受。
+
+RISC-V does not offer a generic pseudoinstruction to load an arbitrary floating
+point immediate value. Instead, a programmer can use the `.float`/`.double`
+directive to declare a floating point immediate value in the source code, and
+then load it into a floating point register using the load global
+pseudoinstruction (`fl{h|w|d|q}`).
+// 中文：RISC-V 没有用于加载任意浮点立即数的通用伪指令。
+// 中文：程序员可以先用 `.float`／`.double` 在源代码中声明浮点立即数，再通过加载全局对象的伪指令 `fl{h|w|d|q}` 将其加载到浮点寄存器中。
+
+
+[source, asm]
+----
+  .data
+.VAL:
+  .float .0x1p+17
+  .text
+  flw fa0, .VAL, t0
+----
+
+[id=fli-operand-value]
+.FLI operands reference table
+// 中文：表：FLI 操作数参考表。
+[%autowidth]
+|===
+|*Value*        | *Example legal input values*
+// 中文：表头：数值；合法输入值示例。
+|-1.0                        | -0x1p+0, -1.0, -1.0e+0
+|Minimum positive normal     | min
+// 中文：最小正规格化正数；输入写法为 min。
+|1.0 x 2 ^ -16               | 0x1p-16, 0.0000152587890625, 1.52587890625e-05
+|1.0 x 2 ^ -15               | 0x1p-15, 0.000030517578125, 3.0517578125e-05
+|1.0 x 2 ^ -8                | 0x1p-8, 0.00390625, 3.90625e-03
+|1.0 x 2 ^ -7                | 0x1p-7, 0.0078125, 7.8125e-03
+|0.0625 (2 ^ -4)             | 0x1p-4, 0.0625, 6.25e-02
+|0.125 (2 ^ -3)              | 0x1p-3, 0.125, 1.25e-01
+|0.25                        | 0x1p-2, 0.25, 2.5e-01
+|0.3125                      | 0x1.4p-2, 0.3125, 3.125e-01
+|0.375                       | 0x1.8p-2, 0.375, 3.75e-01
+|0.4375                      | 0x1.cp-2, 0.4375, 4.375e-01
+|0.5                         | 0x1p-1, 0.5, 5.0e-01
+|0.625                       | 0x1.4p-1, 0.625, 6.25e-01
+|0.75                        | 0x1.8p-1, 0.75, 7.5e-01
+|0.875                       | 0x1.cp-1, 0.875, 8.75e-01
+|1.0                         | 0x1p+0, 1.0, 1.0e+00
+|1.25                        | 0x1.4p+0, 1.25, 1.25e+00
+|1.5                         | 0x1.8p+0, 1.5, 1.5e+00
+|1.75                        | 0x1.cp+0, 1.75, 1.75e+00
+|2.0                         | 0x1p+1, 2.0, 2.0e+00
+|2.5                         | 0x1.4p+1, 2.5, 2.5e+00
+|3                           | 0x1.8p+1, 3.0, 3.0e+00
+|4                           | 0x1p+2, 4.0, 4.0e+00
+|8                           | 0x1p+3, 8.0, 8.0e+00
+|16                          | 0x1p+4, 16.0, 1.6e+01
+|128 (2 ^ 7)                 | 0x1p+7, 128.0, 1.28e+02
+|256 (2 ^ 8)                 | 0x1p+8, 256.0, 2.56e+02
+|2 ^ 15                      | 0x1p+15, 32768.0, 3.2768e+04
+|2 ^ 16                      | 0x1p+16, 65536.0, 6.5536e+04
+|Positive infinity           | inf
+// 中文：正无穷大；输入写法为 inf。
+|Canonical NaN               | nan
+// 中文：规范形式的 NaN（非数）；输入写法为 nan。
+|===
+
+A value can be expressed in various forms within the same format. For example,
+6.5536e+04 can be alternatively written as 6553.6e+01 or 65.536e+03. The table
+provides one possible representation, but any equivalent exact value may be used.
+// 中文：同一种格式中的数值也可以有多种写法。
+// 中文：例如，6.5536e+04 也可以写成 6553.6e+01 或 65.536e+03。
+// 中文：表中仅给出一种可能的表示，只要精确数值相同，也可以使用其他等价写法。
+
+== Load Address
+// 中文：加载地址
+
+The following example shows the `la` pseudoinstruction which is used to load
+symbol addresses using the correct sequence based on whether the code is being
+assembled as PIC:
+// 中文：下面的示例展示 `la` 伪指令：它用于加载符号地址，并根据代码是否按 PIC 方式汇编来选择正确的指令序列：
+
+[source, asm]
+----
+  la  a0, msg + 1
+----
+
+For non-PIC this is an alias for the `lla` pseudoinstruction documented below.
+// 中文：对于非 PIC 代码，它是下文所述 `lla` 伪指令的别名。
+
+For PIC this is an alias for the `lga` pseudoinstruction documented below.
+// 中文：对于 PIC 代码，它是下文所述 `lga` 伪指令的别名。
+
+The `la` pseudoinstruction is the preferred way for getting the address of
+variables in assembly unless explicit control over PC-relative or GOT-indirect
+addressing is required.
+// 中文：除非需要显式控制 PC 相对寻址或 GOT 间接寻址，否则在汇编中获取变量地址时，优先使用 `la` 伪指令。
+
+== Load Local Address
+// 中文：加载局部符号地址
+
+The following example shows the `lla` pseudoinstruction which is used to load
+local symbol addresses:
+// 中文：下面的示例展示用于加载局部符号地址的 `lla` 伪指令：
+
+[source, asm]
+----
+  lla a0, msg + 1
+----
+
+This generates the following instructions and relocations as seen by `objdump`:
+// 中文：它会生成如下指令和重定位信息，可通过 `objdump` 查看：
+
+[source, asm]
+----
+0000000000000000 <.text>:
+   0: 00000517            auipc a0,0x0
+      0: R_RISCV_PCREL_HI20 msg+0x1
+   4: 00050513            mv  a0,a0
+      4: R_RISCV_PCREL_LO12_I .L0
+----
+
+== Load Global Address
+// 中文：加载全局符号地址
+
+The following example shows the `lga` pseudoinstruction which is used to load
+global symbol addresses:
+// 中文：下面的示例展示用于加载全局符号地址的 `lga` 伪指令：
+
+[source, asm]
+----
+  lga a0, msg + 1
+----
+
+This generates the following instructions and relocations as seen by `objdump`
+(for RV64; RV32 will use `lw` instead of `ld`):
+// 中文：它会生成如下指令和重定位信息，可通过 `objdump` 查看（这里针对 RV64；RV32 会使用 `lw` 而不是 `ld`）：
+
+[source, asm]
+----
+0000000000000000 <.text>:
+   0: 00000517            auipc a0,0x0
+      0: R_RISCV_GOT_HI20 msg+0x1
+   4: 00053503            ld  a0,0(a0) # 0 <.text>
+      4: R_RISCV_PCREL_LO12_I .L0
+----
+
+== Load and Store Global
+// 中文：加载和存储全局对象
+
+The following pseudoinstructions are available to load from and store to
+global objects:
+// 中文：以下伪指令可用于加载和存储全局对象：
+
+* `l{b|h|w|d} <rd>, <symbol expression>`: load byte, half word, word or double word from global{empty}
+footnote:fn-1[the first operand is implicitly used as a scratch register.]
+// 中文：`l{b|h|w|d} <rd>, <symbol expression>`：从全局对象加载字节、半字、字或双字。
+// 中文：脚注 1：第一个操作数还隐式用作临时工作寄存器。
+* `l{bu|hu|wu} <rd>, <symbol expression>`: load unsigned byte, half word, or word from global{empty}
+footnote:fn-1[]
+// 中文：`l{bu|hu|wu} <rd>, <symbol expression>`：从全局对象加载无符号字节、半字或字。
+// 中文：脚注 1 同上：第一个操作数还隐式用作临时工作寄存器。
+* `s{b|h|w|d} <rd>, <symbol expression>, <rt>`: store byte, half word, word or double word to global{empty}
+footnote:fn-2[the last operand specifies a scratch register used by the pseudo; its value is unpredictable following the pseudo.]
+// 中文：`s{b|h|w|d} <rd>, <symbol expression>, <rt>`：将字节、半字、字或双字存入全局对象。
+// 中文：脚注 2：最后一个操作数指定该伪指令使用的临时工作寄存器；伪指令执行后，该寄存器的值不可预测。
+* `fl{h|w|d|q} <rd>, <symbol expression>, <rt>`: load half, float, double or quad precision from global{empty}
+footnote:fn-2[]
+// 中文：`fl{h|w|d|q} <rd>, <symbol expression>, <rt>`：从全局对象加载半精度、单精度、双精度或四倍精度浮点数。
+// 中文：脚注 2 同上：最后一个操作数指定临时工作寄存器，执行后其值不可预测。
+* `fs{h|w|d|q} <rd>, <symbol expression>, <rt>`: store half, float, double or quad precision to global{empty}
+footnote:fn-2[]
+// 中文：`fs{h|w|d|q} <rd>, <symbol expression>, <rt>`：将半精度、单精度、双精度或四倍精度浮点数存入全局对象。
+// 中文：脚注 2 同上：最后一个操作数指定临时工作寄存器，执行后其值不可预测。
+
+The following example shows how these pseudoinstructions are used:
+// 中文：下面的示例展示这些伪指令的用法：
+
+[source, asm]
+----
+  lw  a0, var1
+  fld fa0, var2, t0
+  sw  a0, var3, t0
+  fsd fa0, var4, t0
+----
+
+Which generates the following assembler output and relocations
+as seen by `objdump`:
+// 中文：它会生成如下汇编输出和重定位信息，可通过 `objdump` 查看：
+
+[source, asm]
+----
+0000000000000000 <.text>:
+   0: 00000517            auipc a0,0x0
+      0: R_RISCV_PCREL_HI20 var1
+   4: 00052503            lw  a0,0(a0) # 0 <.text>
+      4: R_RISCV_PCREL_LO12_I .L0
+   8: 00000297            auipc t0,0x0
+      8: R_RISCV_PCREL_HI20 var2
+   c: 0002b507            fld fa0,0(t0) # 8 <.text+0x8>
+      c: R_RISCV_PCREL_LO12_I .L0
+  10: 00000297            auipc t0,0x0
+      10: R_RISCV_PCREL_HI20  var3
+  14: 00a2a023            sw  a0,0(t0) # 10 <.text+0x10>
+      14: R_RISCV_PCREL_LO12_S  .L0
+  18: 00000297            auipc t0,0x0
+      18: R_RISCV_PCREL_HI20  var4
+  1c: 00a2b027            fsd fa0,0(t0) # 18 <.text+0x18>
+      1c: R_RISCV_PCREL_LO12_S  .L0
+----
+
+On RV32, `ld <rd>, <symbol expression>` and `sd <rd>, <symbol expression>, <rt>` can be used to
+generate a sequence including the `ld` and `sd` instructions in Zilsd -- in
+these cases, `<rd>` denotes the even GPR in an even-odd GPR pair.
+// 中文：在 RV32 上，`ld <rd>, <symbol expression>` 和 `sd <rd>, <symbol expression>, <rt>` 可生成包含 Zilsd 扩展中 `ld`、`sd` 指令的序列。
+// 中文：在这些情况下，`<rd>` 表示一对偶数／奇数编号通用寄存器中的偶数编号寄存器。
+
+== Constants
+// 中文：常量
+
+The following example shows loading a constant using the `%hi` and
+`%lo` assembler functions.
+// 中文：下面的示例展示如何使用汇编器函数 `%hi` 和 `%lo` 加载常量。
+
+[source, asm]
+----
+  .equ  UART_BASE, 0x40003080
+
+  lui a0, %hi(UART_BASE)
+  addi  a0, a0, %lo(UART_BASE)
+----
+
+Which generates the following assembler output
+as seen by `objdump`:
+// 中文：它会生成如下汇编输出，可通过 `objdump` 查看：
+
+[source, asm]
+----
+0000000000000000 <.text>:
+   0: 40003537            lui a0,0x40003
+   4: 08050513            addi  a0,a0,128 # 40003080 <UART_BASE>
+----
+
+== Far Branches
+// 中文：远距离分支
+
+When a conditional branch cannot reach a destination, the assembler will replace
+these with far branches which use the longer offset available to unconditional
+jumps to reach the destination. This is done by inserting a short branch with
+inverted conditions past an unconditional jump.  For example:
+// 中文：当条件分支无法到达目标地址时，汇编器会将其替换成远距离分支，利用无条件跳转所支持的更大偏移范围到达目标。
+// 中文：具体做法是在无条件跳转之前插入一条条件相反的短分支，使其跳过这条无条件跳转。
+// 中文：例如：
+
+[source, asm]
+----
+target:
+  bne a0, a1, target
+.rep 1024
+  nop
+.endr
+  bne a0, a1, target
+----
+
+This example uses a series of `nop`s to separate the final instruction from the
+branch target `target` such that the second `bne` instruction cannot reach it
+with its offset. As such a unconditional branch to the target is added and the
+original instruction replaced with a conditional branch with inverted conditions
+to jump over this new instruction. Consequently, the final assembled binary
+contains the following:
+// 中文：这个示例通过一系列 `nop` 拉开最后一条指令与分支目标 `target` 的距离，使第二条 `bne` 的偏移范围无法覆盖目标。
+// 中文：因此，汇编器会增加一条到目标的无条件跳转，并将原指令替换为条件相反的分支，用于跳过新增的跳转指令。
+// 中文：最终汇编生成的二进制包含如下内容：
+
+[source, asm]
+----
+       0: 00b51063            bne a0,a1,0 <target>
+...
+    1004: 00b50463            beq a0,a1,100c <target+0x100c>
+    1008: ff9fe06f            j 0 <target>
+----
+
+== Function Calls
+// 中文：函数调用
+The following pseudoinstructions are available to call subroutines far from
+the current position:
+// 中文：以下伪指令可用于调用距离当前位置较远的子程序：
+
+* `call <symbol>`: call away subroutine{empty}
+footnote:fn-3[`ra` is implicitly used to save the return address.]
+// 中文：`call <symbol>`：调用远处的子程序。
+// 中文：脚注 3：隐式使用 `ra` 保存返回地址。
+* `call <rd>, <symbol>`: call away subroutine{empty}
+footnote:fn-4[similar to `call <symbol>`, but `<rd>` is used to save the return address instead.]
+// 中文：`call <rd>, <symbol>`：调用远处的子程序。
+// 中文：脚注 4：类似 `call <symbol>`，但改用 `<rd>` 保存返回地址。
+* `tail <symbol>`: tail call away subroutine{empty}
+footnote:fn-5[If the `Zicfilp` extension is available, `t2` is implicitly used as a scratch register. Otherwise,`t1` is implicitly used as a scratch register.]
+// 中文：`tail <symbol>`：尾调用远处的子程序。
+// 中文：脚注 5：如果支持 `Zicfilp` 扩展，则隐式使用 `t2` 作为临时工作寄存器；否则隐式使用 `t1`。
+* `tail <symbol>, <rt>`: tail call away subroutine{empty}
+footnote:fn-6[`<rt>` is implicitly used as a scratch register.]
+// 中文：`tail <symbol>, <rt>`：尾调用远处的子程序。
+// 中文：脚注 6：隐式使用 `<rt>` 作为临时工作寄存器。
+* `jump <symbol>, <rt>`: jump to far-away label{empty}
+footnote:fn-7[similar to `tail <symbol>`, but `<rt>` is used as the scratch register instead.]
+// 中文：`jump <symbol>, <rt>`：跳转到远处的标签。
+// 中文：脚注 7：类似 `tail <symbol>`，但改用 `<rt>` 作为临时工作寄存器。
+
+The following example shows how these pseudoinstructions are used:
+// 中文：下面的示例展示这些伪指令的用法：
+
+[source, asm]
+----
+  call  func1
+  tail  func2
+  jump  func3, t0
+----
+
+Which generates the following assembler output and relocations
+as seen by `objdump`:
+// 中文：它会生成如下汇编输出和重定位信息，可通过 `objdump` 查看：
+
+[source, asm]
+----
+0000000000000000 <.text>:
+   0: 00000097            auipc ra,0x0
+      0: R_RISCV_CALL func1
+   4: 000080e7            jalr  ra # 0x0
+   8: 00000317            auipc t1,0x0
+      8: R_RISCV_CALL func2
+   c: 00030067            jr  t1 # 0x8
+  10: 00000297            auipc t0,0x0
+      10: R_RISCV_CALL  func3
+  14: 00028067            jr  t0 # 0x10
+----
+
+== Floating-point rounding modes
+// 中文：浮点舍入模式
+
+For floating-point instructions with a rounding mode field, the rounding mode
+can be specified by adding an additional operand. e.g. `fcvt.w.s` with
+round-to-zero can be written as `fcvt.w.s a0, fa0, rtz`. If unspecified, the
+default `dyn` rounding mode will be used.
+// 中文：对于带有舍入模式字段的浮点指令，可以通过增加一个操作数来指定舍入模式。
+// 中文：例如，使用向零舍入的 `fcvt.w.s` 可写成 `fcvt.w.s a0, fa0, rtz`。
+// 中文：如果未指定，则使用默认的 `dyn` 舍入模式。
+
+Supported rounding modes are as follows (must be specified in lowercase):
+// 中文：支持的舍入模式如下（必须使用小写）：
+
+* `rne`: round to nearest, ties to even
+// 中文：`rne`：舍入到最近的可表示值；距离相同时，选择最低有效位为偶数的结果。
+* `rtz`: round towards zero
+// 中文：`rtz`：向零舍入。
+* `rdn`: round down
+// 中文：`rdn`：向下舍入（朝负无穷方向）。
+* `rup`: round up
+// 中文：`rup`：向上舍入（朝正无穷方向）。
+* `rmm`: round to nearest, ties to max magnitude
+// 中文：`rmm`：舍入到最近的可表示值；距离相同时，选择绝对值较大的结果。
+* `dyn`: dynamic rounding mode (the rounding mode specified in the `frm` field
+of the `fcsr` register is used)
+// 中文：`dyn`：动态舍入模式，使用 `fcsr` 寄存器中 `frm` 字段指定的舍入模式。
+
+== Control and Status Registers
+// 中文：控制与状态寄存器
+
+The following code sample shows how to enable timer interrupts,
+set and wait for a timer interrupt to occur:
+// 中文：下面的代码示例展示如何启用定时器中断、设置定时器，并等待定时器中断发生：
+
+[source, asm]
+----
+.equ RTC_BASE,      0x40000000
+.equ TIMER_BASE,    0x40004000
+
+# setup machine trap vector
+1:      auipc   t0, %pcrel_hi(mtvec)        # load mtvec(hi)
+        addi    t0, t0, %pcrel_lo(1b)       # load mtvec(lo)
+        csrrw   zero, mtvec, t0
+
+# set mstatus.MIE=1 (enable M mode interrupt)
+        li      t0, 8
+        csrrs   zero, mstatus, t0
+
+# set mie.MTIE=1 (enable M mode timer interrupts)
+        li      t0, 128
+        csrrs   zero, mie, t0
+
+# read from mtime
+        li      a0, RTC_BASE
+        ld      a1, 0(a0)
+
+# write to mtimecmp
+        li      a0, TIMER_BASE
+        li      t0, 1000000000
+        add     a1, a1, t0
+        sd      a1, 0(a0)
+
+# loop
+loop:
+        wfi
+        j loop
+
+# break on interrupt
+mtvec:
+        csrrc  t0, mcause, zero
+        bgez t0, fail       # interrupt causes are less than zero
+        slli t0, t0, 1      # shift off high bit
+        srli t0, t0, 1
+        li t1, 7            # check this is an m_timer interrupt
+        bne t0, t1, fail
+        j pass
+
+pass:
+        la a0, pass_msg
+        jal puts
+        j shutdown
+
+fail:
+        la a0, fail_msg
+        jal puts
+        j shutdown
+
+.section .rodata
+
+pass_msg:
+        .string "PASS\n"
+
+fail_msg:
+        .string "FAIL\n"
+----
+
+[id=pseudoinstructions]
+== A listing of standard RISC-V pseudoinstructions
+// 中文：标准 RISC-V 伪指令一览
+
+:fn-8: footnote:[The compiler can generate different instruction sequences to load a specific numeric value into a register.]
+// 中文：脚注 8：编译器可以生成不同的指令序列，将某个指定数值加载到寄存器中。
+
+.Pseudo Instructions
+// 中文：表：伪指令。
+[cols="30,35,20,15"]
+|===
+|*Pseudoinstruction*          |*Base Instruction(s)*                                          |*Meaning*     |*Comment*
+// 中文：表头：伪指令；基础指令；含义；备注。
+
+|la rd, symbol
+|auipc rd, symbol[31:12] +
+addi rd, rd, symbol[11:0]
+|Load address
+|With `.option nopic` (Default)
+// 中文：`la rd, symbol`：加载地址；使用 `.option nopic` 时（默认）。
+
+|la rd, symbol
+|auipc rd, symbol@GOT[31:12] +
+l{w\|d} rd, symbol@GOT[11:0](rd)
+|Load address
+|With `.option pic`
+// 中文：`la rd, symbol`：加载地址；使用 `.option pic` 时。
+
+|lla rd, symbol
+|auipc rd, symbol[31:12] +
+addi rd, rd, symbol[11:0]
+|Load local address
+|
+// 中文：`lla rd, symbol`：加载局部符号地址。
+
+|lga rd, symbol
+|auipc rd, symbol@GOT[31:12] +
+l{w\|d} rd, symbol@GOT[11:0](rd)
+|Load global address
+|
+// 中文：`lga rd, symbol`：加载全局符号地址。
+
+|l{b\|h\|w\|d} rd, symbol
+|auipc rd, symbol[31:12] +
+l{b\|h\|w\|d} rd, symbol[11:0](rd)
+|Load global
+|
+// 中文：`l{b|h|w|d} rd, symbol`：加载全局对象的值。
+
+|l{bu\|hu\|wu} rd, symbol
+|auipc rd, symbol[31:12] +
+l{bu\|hu\|wu} rd, symbol[11:0](rd)
+|Load global, unsigned
+|
+// 中文：`l{bu|hu|wu} rd, symbol`：加载全局对象的无符号值。
+
+|s{b\|h\|w\|d} rd, symbol, rt
+|auipc rt, symbol[31:12] +
+s{b\|h\|w\|d} rd, symbol[11:0](rt)
+|Store global
+|
+// 中文：`s{b|h|w|d} rd, symbol, rt`：将值存入全局对象。
+
+|fl{h\|w\|d\|q} rd, symbol, rt
+| auipc rt, symbol[31:12] +
+fl{h\|w\|d\|q} rd, symbol[11:0](rt)
+|Floating-point load global
+|
+// 中文：`fl{h|w|d|q} rd, symbol, rt`：从全局对象加载浮点值。
+
+|fs{h\|w\|d\|q} rd, symbol, rt
+|auipc rt, symbol[31:12] +
+fs{h\|w\|d\|q} rd, symbol[11:0](rt)
+|Floating-point store global
+|
+// 中文：`fs{h|w|d|q} rd, symbol, rt`：将浮点值存入全局对象。
+
+|nop                          | addi x0, x0, 0                                                | No operation |
+// 中文：`nop`：空操作。
+|li rd, immediate             | *Myriad sequences{fn-8}                                       | Load immediate |
+// 中文：`li rd, immediate`：加载立即数；基础指令序列有多种可能（见脚注 8）。
+|mv rd, rs                    | addi rd, rs, 0                                                | Copy register |
+// 中文：`mv rd, rs`：复制寄存器的值。
+|not rd, rs                   | xori rd, rs, -1                                               | Ones’ complement |
+// 中文：`not rd, rs`：按位取反（反码）。
+|neg rd, rs                   | sub rd, x0, rs                                                | Two’s complement |
+// 中文：`neg rd, rs`：求补码，即取算术相反数。
+|negw rd, rs                  | subw rd, x0, rs                                               | Two’s complement word |
+// 中文：`negw rd, rs`：对一个字求补码，即对 32 位字取算术相反数。
+
+|sext.b rd, rs
+|slli rd, rs, XLEN - 8 +
+srai rd, rd, XLEN - 8
+|Sign extend byte
+|This is a single instruction when `Zbb` extension is available.
+// 中文：`sext.b rd, rs`：对字节进行符号扩展；支持 `Zbb` 扩展时，只需一条指令。
+
+|sext.h rd, rs
+|slli rd, rs, XLEN - 16 +
+srai rd, rd, XLEN - 16
+|Sign extend halfword
+|This is a single instruction when `Zbb` extension is available.
+// 中文：`sext.h rd, rs`：对半字进行符号扩展；支持 `Zbb` 扩展时，只需一条指令。
+
+|sext.w rd, rs                | addiw rd, rs, 0                                               | Sign extend word |
+// 中文：`sext.w rd, rs`：对字进行符号扩展。
+|zext.b rd, rs                | andi rd, rs, 255                                              | Zero extend byte |
+// 中文：`zext.b rd, rs`：对字节进行零扩展。
+
+|zext.h rd, rs
+|slli rd, rs, XLEN - 16 +
+srli rd, rd, XLEN - 16
+|Zero extend halfword
+|This is a single instruction when `Zbb` extension is available.
+// 中文：`zext.h rd, rs`：对半字进行零扩展；支持 `Zbb` 扩展时，只需一条指令。
+
+|zext.w rd, rs
+|slli rd, rs, XLEN - 32 +
+srli rd, rd, XLEN - 32
+|Zero extend word
+|When `Zba` extension is not available
+// 中文：`zext.w rd, rs`：对字进行零扩展；不支持 `Zba` 扩展时。
+
+|zext.w rd, rs
+|add.uw rd, rs, x0
+|Zero extend word
+|When `Zba` extension is available
+// 中文：`zext.w rd, rs`：对字进行零扩展；支持 `Zba` 扩展时。
+
+|seqz rd, rs                  | sltiu rd, rs, 1                                               | Set if = zero |
+// 中文：`seqz rd, rs`：等于零时置 1，否则置 0。
+|snez rd, rs                  | sltu rd, x0, rs                                               | Set if != zero |
+// 中文：`snez rd, rs`：不等于零时置 1，否则置 0。
+|sltz rd, rs                  | slt rd, rs, x0                                                | Set if < zero |
+// 中文：`sltz rd, rs`：小于零时置 1，否则置 0。
+|sgtz rd, rs                  | slt rd, x0, rs                                                | Set if > zero |
+// 中文：`sgtz rd, rs`：大于零时置 1，否则置 0。
+|sgt  rd, rs, rt              | slt rd, rt, rs                                                | Set if > |
+// 中文：`sgt  rd, rs, rt`：大于时置 1，否则置 0。
+|sgtu rd, rs, rt              | sltu rd, rt, rs                                               | Set if >, unsigned |
+// 中文：`sgtu rd, rs, rt`：按无符号数比较，大于时置 1，否则置 0。
+|fmv.h frd, frs               | fsgnj.h frd, frs, frs                                         | Copy half-precision register |
+// 中文：`fmv.h frd, frs`：复制半精度浮点寄存器的值。
+|fabs.h frd, frs              | fsgnjx.h frd, frs, frs                                        | Half-precision absolute value |
+// 中文：`fabs.h frd, frs`：半精度浮点绝对值。
+|fneg.h frd, frs              | fsgnjn.h frd, frs, frs                                        | Half-precision negate |
+// 中文：`fneg.h frd, frs`：半精度浮点取相反数。
+|fgt.h rd, frs, frt           | flt.h rd, frt, frs                                            | Half-precision > |
+// 中文：`fgt.h rd, frs, frt`：半精度浮点大于比较。
+|fge.h rd, frs, frt           | fle.h rd, frt, frs                                            | Half-precision >= |
+// 中文：`fge.h rd, frs, frt`：半精度浮点大于或等于比较。
+|fmv.s frd, frs               | fsgnj.s frd, frs, frs                                         | Copy single-precision register |
+// 中文：`fmv.s frd, frs`：复制单精度浮点寄存器的值。
+|fabs.s frd, frs              | fsgnjx.s frd, frs, frs                                        | Single-precision absolute value |
+// 中文：`fabs.s frd, frs`：单精度浮点绝对值。
+|fneg.s frd, frs              | fsgnjn.s frd, frs, frs                                        | Single-precision negate |
+// 中文：`fneg.s frd, frs`：单精度浮点取相反数。
+|fgt.s rd, frs, frt           | flt.s rd, frt, frs                                            | Single-precision > |
+// 中文：`fgt.s rd, frs, frt`：单精度浮点大于比较。
+|fge.s rd, frs, frt           | fle.s rd, frt, frs                                            | Single-precision >= |
+// 中文：`fge.s rd, frs, frt`：单精度浮点大于或等于比较。
+|fmv.d frd, frs               | fsgnj.d frd, frs, frs                                         | Copy double-precision register |
+// 中文：`fmv.d frd, frs`：复制双精度浮点寄存器的值。
+|fabs.d frd, frs              | fsgnjx.d frd, frs, frs                                        | Double-precision absolute value |
+// 中文：`fabs.d frd, frs`：双精度浮点绝对值。
+|fneg.d frd, frs              | fsgnjn.d frd, frs, frs                                        | Double-precision negate |
+// 中文：`fneg.d frd, frs`：双精度浮点取相反数。
+|fgt.d rd, frs, frt           | flt.d rd, frt, frs                                            | Double-precision > |
+// 中文：`fgt.d rd, frs, frt`：双精度浮点大于比较。
+|fge.d rd, frs, frt           | fle.d rd, frt, frs                                            | Double-precision >= |
+// 中文：`fge.d rd, frs, frt`：双精度浮点大于或等于比较。
+|fmv.q frd, frs               | fsgnj.q frd, frs, frs                                         | Copy quad-precision register |
+// 中文：`fmv.q frd, frs`：复制四倍精度浮点寄存器的值。
+|fabs.q frd, frs              | fsgnjx.q frd, frs, frs                                        | Quad-precision absolute value |
+// 中文：`fabs.q frd, frs`：四倍精度浮点绝对值。
+|fneg.q frd, frs              | fsgnjn.q frd, frs, frs                                        | Quad-precision negate |
+// 中文：`fneg.q frd, frs`：四倍精度浮点取相反数。
+|fgt.q rd, frs, frt           | flt.q rd, frt, frs                                            | Quad-precision > |
+// 中文：`fgt.q rd, frs, frt`：四倍精度浮点大于比较。
+|fge.q rd, frs, frt           | fle.q rd, frt, frs                                            | Quad-precision >= |
+// 中文：`fge.q rd, frs, frt`：四倍精度浮点大于或等于比较。
+|beqz rs, offset              | beq rs, x0, offset                                            | Branch if = zero |
+// 中文：`beqz rs, offset`：等于零时分支。
+|bnez rs, offset              | bne rs, x0, offset                                            | Branch if != zero |
+// 中文：`bnez rs, offset`：不等于零时分支。
+|blez rs, offset              | bge x0, rs, offset                                            | Branch if ≤ zero |
+// 中文：`blez rs, offset`：小于或等于零时分支。
+|bgez rs, offset              | bge rs, x0, offset                                            | Branch if ≥ zero |
+// 中文：`bgez rs, offset`：大于或等于零时分支。
+|bltz rs, offset              | blt rs, x0, offset                                            | Branch if < zero |
+// 中文：`bltz rs, offset`：小于零时分支。
+|bgtz rs, offset              | blt x0, rs, offset                                            | Branch if > zero |
+// 中文：`bgtz rs, offset`：大于零时分支。
+|bgt rs, rt, offset           | blt rt, rs, offset                                            | Branch if > |
+// 中文：`bgt rs, rt, offset`：大于时分支。
+|ble rs, rt, offset           | bge rt, rs, offset                                            | Branch if ≤ |
+// 中文：`ble rs, rt, offset`：小于或等于时分支。
+|bgtu rs, rt, offset          | bltu rt, rs, offset                                           | Branch if >, unsigned |
+// 中文：`bgtu rs, rt, offset`：按无符号数比较，大于时分支。
+|bleu rs, rt, offset          | bgeu rt, rs, offset                                           | Branch if ≤, unsigned |
+// 中文：`bleu rs, rt, offset`：按无符号数比较，小于或等于时分支。
+|j offset                     | jal x0, offset                                                | Jump |
+// 中文：`j offset`：跳转。
+
+|jump offset, rt
+|auipc rt, offset[31:12] +
+jalr x0, offset[11:0](rt)
+|Jump to far-away label
+|
+// 中文：`jump offset, rt`：跳转到远处的标签。
+
+|jal offset                   | jal x1, offset                                                | Jump and link |
+// 中文：`jal offset`：跳转并保存返回地址。
+|jr rs                        | jalr x0, 0(rs)                                                | Jump register |
+// 中文：`jr rs`：跳转到寄存器给出的地址。
+|jr offset(rs)                | jalr x0, offset(rs)                                           | Jump register plus offset |
+// 中文：`jr offset(rs)`：跳转到寄存器值加偏移量所给出的地址。
+|jalr rs                      | jalr x1, 0(rs)                                                | Jump and link register |
+// 中文：`jalr rs`：跳转到寄存器给出的地址，并保存返回地址。
+|jalr offset(rs)              | jalr x1, offset(rs)                                           | Jump and link register plus offset |
+// 中文：`jalr offset(rs)`：跳转到寄存器值加偏移量所给出的地址，并保存返回地址。
+|jalr rd, rs                  | jalr rd, 0(rs)                                                | Jump and link register |
+// 中文：`jalr rd, rs`：跳转到寄存器给出的地址，并保存返回地址。
+|ret                          | jalr x0, 0(x1)                                                | Return from subroutine |
+// 中文：`ret`：从子程序返回。
+|vfneg.v vd, vs               | vfsgnjn.vv vd, vs, vs                                         | Floating-point vector negate |
+// 中文：`vfneg.v vd, vs`：逐元素对浮点向量取相反数。
+|vfabs.v vd, vs               | vfsgnjx.vv vd, vs, vs                                         | Floating-point vector absolute value |
+// 中文：`vfabs.v vd, vs`：逐元素求浮点向量的绝对值。
+|vmclr.m vd                   | vmxor.mm vd, vd, vd                                           | Vector clear mask register |
+// 中文：`vmclr.m vd`：清零向量掩码寄存器。
+|vmfge.vv vd, va, vb, vm      | vmfle.vv vd, vb, va, vm                                       | Vector Floating-point >=|
+// 中文：`vmfge.vv vd, va, vb, vm`：逐元素进行浮点向量大于或等于比较。
+|vmfgt.vv vd, va, vb, vm      | vmflt.vv vd, vb, va, vm                                       | Vector Floating-point >|
+// 中文：`vmfgt.vv vd, va, vb, vm`：逐元素进行浮点向量大于比较。
+|vmmv.m vd, vs                | vmand.mm vd, vs, vs                                           | Vector copy mask register |
+// 中文：`vmmv.m vd, vs`：复制向量掩码寄存器。
+|vmnot.m vd, vs               | vmnand.mm vd, vs, vs                                          | Vector invert mask bits|
+// 中文：`vmnot.m vd, vs`：对向量掩码位取反。
+|vmset.m vd                   | vmxnor.mm vd, vd, vd                                          | Vector set all mask bits|
+// 中文：`vmset.m vd`：将向量掩码的所有位设为 1。
+|vmsge.vi vd, va, i, vm       | vmsgt.vi vd, va, i-1, vm                                      | Vector >= Immediate| When -15 <= i <= 16
+// 中文：`vmsge.vi vd, va, i, vm`：逐元素比较向量是否大于或等于立即数；适用于 -15 <= i <= 16。
+|vmsgeu.vi vd, va, i, vm      | vmsgtu.vi vd, va, i-1, vm                                     | Vector >= Immediate, unsigned| When i != 0 and -15 <= i <= 16
+// 中文：`vmsgeu.vi vd, va, i, vm`：按无符号数逐元素比较向量是否大于或等于立即数；适用于 i != 0 且 -15 <= i <= 16。
+|vmsgeu.vi vd, va, 0, vm      | vmseq.vv vd, va, va, vm                                       | Vector >= Immediate, unsigned| Sets active elements to true
+// 中文：`vmsgeu.vi vd, va, 0, vm`：按无符号数逐元素比较向量是否大于或等于立即数；将活动元素的比较结果设为真。
+|vmsge.vv vd, va, vb, vm      | vmsle.vv vd, vb, va, vm                                       | Vector >= Vector|
+// 中文：`vmsge.vv vd, va, vb, vm`：逐元素比较一个向量是否大于或等于另一个向量。
+|vmsgeu.vv vd, va, vb, vm     | vmsleu.vv vd, vb, va, vm                                      | Vector >= Vector, unsigned |
+// 中文：`vmsgeu.vv vd, va, vb, vm`：按无符号数逐元素比较一个向量是否大于或等于另一个向量。
+|vmsgt.vv vd, va, vb, vm      | vmslt.vv vd, vb, va, vm                                       | Vector > Vector|
+// 中文：`vmsgt.vv vd, va, vb, vm`：逐元素比较一个向量是否大于另一个向量。
+|vmsgtu.vv vd, va, vb, vm     | vmsltu.vv vd, vb, va, vm                                      | Vector > Vector, unsigned|
+// 中文：`vmsgtu.vv vd, va, vb, vm`：按无符号数逐元素比较一个向量是否大于另一个向量。
+|vmslt.vi vd, va, i, vm       | vmsle.vi vd, va, i-1, vm                                      | Vector < immediate| When -15 <= i <= 16
+// 中文：`vmslt.vi vd, va, i, vm`：逐元素比较向量是否小于立即数；适用于 -15 <= i <= 16。
+|vmsltu.vi vd, va, i, vm      | vmsleu.vi vd, va, i-1, vm                                     | Vector < immediate, unsigned | When i != 0 and -15 <= i <= 16
+// 中文：`vmsltu.vi vd, va, i, vm`：按无符号数逐元素比较向量是否小于立即数；适用于 i != 0 且 -15 <= i <= 16。
+|vmsltu.vi vd, va, 0, vm      | vmsne.vv vd, va, va, vm                                       | Vector < immediate, unsigned | Sets active elements to false
+// 中文：`vmsltu.vi vd, va, 0, vm`：按无符号数逐元素比较向量是否小于立即数；将活动元素的比较结果设为假。
+|vneg.v vd,vs                 | vrsub.vx vd,vs,x0                                             | Vector negate |
+// 中文：`vneg.v vd,vs`：逐元素对向量取相反数。
+|vnot.v vd,vs,vm              | vxor.vi vd, vs, -1, vm                                        | Vector not |
+// 中文：`vnot.v vd,vs,vm`：对向量逐位取反。
+|vncvt.x.x.w vd,vs,vm         | vnsrl.wx vd,vs,x0,vm                                          | Vector narrow convert element |
+// 中文：`vncvt.x.x.w vd,vs,vm`：对向量元素进行窄化转换。
+|vwcvt.x.x.v vd,vs,vm         | vwadd.vx vd,vs,x0,vm                                          | Vector widen convert, integer-integer|
+// 中文：`vwcvt.x.x.v vd,vs,vm`：对向量进行整数到整数的加宽转换。
+|vwcvtu.x.x.v vd,vs,vm        | vwaddu.vx vd,vs,x0,vm                                         | Vector widen convert, integer-integer, unsigned|
+// 中文：`vwcvtu.x.x.v vd,vs,vm`：对向量进行无符号整数到整数的加宽转换。
+|vl1r.v v3, (rs1)             | vl1re8.v v3, (rs1)                                            | Equal to vl1re8.v |
+// 中文：`vl1r.v v3, (rs1)`：等价于 vl1re8.v。
+|vl2r.v v2, (rs1)             | vl2re8.v v2, (rs1)                                            | Equal to vl2re8.v |
+// 中文：`vl2r.v v2, (rs1)`：等价于 vl2re8.v。
+|vl4r.v v4, (rs1)             | vl4re8.v v4, (rs1)                                            | Equal to vl4re8.v |
+// 中文：`vl4r.v v4, (rs1)`：等价于 vl4re8.v。
+|vl8r.v v8, (rs1)             | vl8re8.v v8, (rs1)                                            | Equal to vl8re8.v |
+// 中文：`vl8r.v v8, (rs1)`：等价于 vl8re8.v。
+
+|vmsge{u}.vx vd, va, x
+|vmslt{u}.vx vd, va, x +
+vmnand.mm vd, vd, vd
+| Vector >= scalar, unmasked
+|
+// 中文：`vmsge{u}.vx vd, va, x`：逐元素比较向量是否大于或等于标量，不使用掩码。
+
+| vmsge{u}.vx vd, va, x, v0.t
+| vmslt{u}.vx vd, va, x, v0.t +
+ vmxor.mm vd, vd, v0
+| Vector >= scalar, masked
+| When vd≠v0
+// 中文：`vmsge{u}.vx vd, va, x, v0.t`：逐元素比较向量是否大于或等于标量，使用掩码；适用于 vd≠v0。
+
+| vmsge{u}.vx vd, va, x, v0.t, vt
+| vmslt{u}.vx vt, va, x +
+ vmandn.mm vd, vd, vt
+| Vector >= scalar, masked
+| When vd=v0
+// 中文：`vmsge{u}.vx vd, va, x, v0.t, vt`：逐元素比较向量是否大于或等于标量，使用掩码；适用于 vd=v0。
+
+|vmsge{u}.vx vd, va, x, v0.t, vt
+|vmslt{u}.vx vt, va, x +
+ vmandn.mm vt, v0, vt +
+ vmandn.mm vd, vd, v0 +
+ vmor.mm vd, vt, vd
+| Vector >= scalar, masked
+| For any vd
+// 中文：`vmsge{u}.vx vd, va, x, v0.t, vt`：逐元素比较向量是否大于或等于标量，使用掩码；适用于任意 vd。
+
+
+|call offset
+|auipc x1, offset[31:12] +
+jalr x1, offset[11:0](x1)
+|Call far-away subroutine
+|
+// 中文：`call offset`：调用远处的子程序。
+
+|call rt, offset
+|auipc rt, offset[31:12] +
+jalr rt, offset[11:0](rt)
+|Call far-away subroutine
+|
+// 中文：`call rt, offset`：调用远处的子程序。
+
+|tail offset
+|auipc x6, offset[31:12] +
+jalr x0, offset[11:0](x6)
+| Tail call far-away subroutine
+| It will use `x7` as scratch register when `Zicfilp` extension is available.
+// 中文：`tail offset`：尾调用远处的子程序；支持 `Zicfilp` 扩展时，使用 `x7` 作为临时工作寄存器。
+
+|tail offset, rt
+|auipc rt, offset[31:12] +
+jalr x0, offset[11:0](rt)
+| Tail call far-away subroutine using rt as scratch.
+|
+// 中文：`tail offset, rt`：尾调用远处的子程序，使用 rt 作为临时工作寄存器。
+
+|fence                        | fence iorw, iorw                                              | Fence on all memory and I/O |
+// 中文：`fence`：对所有内存和 I/O 访问设置屏障。
+|pause                        | fence w, 0                                                    | PAUSE hint |
+// 中文：`pause`：PAUSE 暂停提示。
+|===
+
+== Pseudoinstructions for accessing control and status registers
+// 中文：访问控制与状态寄存器的伪指令
+
+.Pseudoinstructions for acccessing control and status registers
+// 中文：表：访问控制与状态寄存器的伪指令。
+[%autowidth]
+|===
+|*Pseudoinstruction*          |*Base Instruction(s)*                                          |*Meaning*
+// 中文：表头：伪指令；基础指令；含义。
+|rdinstret[h] rd   | csrrs rd, instret[h], x0   | Read instructions-retired counter
+// 中文：`rdinstret[h] rd`：读取已退休指令计数器（已完成执行的指令数）。
+|rdcycle[h] rd     | csrrs rd, cycle[h], x0     | Read cycle counter
+// 中文：`rdcycle[h] rd`：读取周期计数器。
+|rdtime[h] rd      | csrrs rd, time[h], x0      | Read real-time clock
+// 中文：`rdtime[h] rd`：读取实时时钟。
+|csrr rd, csr      | csrrs rd, csr, x0          | Read CSR
+// 中文：`csrr rd, csr`：读取控制与状态寄存器（CSR）。
+|csrw csr, rs      | csrrw x0, csr, rs          | Write CSR
+// 中文：`csrw csr, rs`：写入 CSR。
+|csrs csr, rs      | csrrs x0, csr, rs          | Set bits in CSR
+// 中文：`csrs csr, rs`：将 CSR 中指定的位设为 1。
+|csrc csr, rs      | csrrc x0, csr, rs          | Clear bits in CSR
+// 中文：`csrc csr, rs`：清除 CSR 中指定的位。
+|csrwi csr, imm    | csrrwi x0, csr, imm        | Write CSR, immediate
+// 中文：`csrwi csr, imm`：用立即数写入 CSR。
+|csrsi csr, imm    | csrrsi x0, csr, imm        | Set bits in CSR, immediate
+// 中文：`csrsi csr, imm`：根据立即数将 CSR 中指定的位设为 1。
+|csrci csr, imm    | csrrci x0, csr, imm        | Clear bits in CSR, immediate
+// 中文：`csrci csr, imm`：根据立即数清除 CSR 中指定的位。
+|frcsr rd          | csrrs rd, fcsr, x0         | Read FP control/status register
+// 中文：`frcsr rd`：读取浮点控制／状态寄存器。
+|fscsr rd, rs      | csrrw rd, fcsr, rs         | Swap FP control/status register
+// 中文：`fscsr rd, rs`：交换浮点控制／状态寄存器的值（写入新值并读取旧值）。
+|fscsr rs          | csrrw x0, fcsr, rs         | Write FP control/status register
+// 中文：`fscsr rs`：写入浮点控制／状态寄存器。
+|frrm rd           | csrrs rd, frm, x0          | Read FP rounding mode
+// 中文：`frrm rd`：读取浮点舍入模式。
+|fsrm rd, rs       | csrrw rd, frm, rs          | Swap FP rounding mode
+// 中文：`fsrm rd, rs`：交换浮点舍入模式（写入新值并读取旧值）。
+|fsrm rs           | csrrw x0, frm, rs          | Write FP rounding mode
+// 中文：`fsrm rs`：写入浮点舍入模式。
+|fsrmi rd, imm     | csrrwi rd, frm, imm        | Swap FP rounding mode, immediate
+// 中文：`fsrmi rd, imm`：用立即数交换浮点舍入模式（写入新值并读取旧值）。
+|fsrmi imm         | csrrwi x0, frm, imm        | Write FP rounding mode, immediate
+// 中文：`fsrmi imm`：用立即数写入浮点舍入模式。
+|frflags rd        | csrrs rd, fflags, x0       | Read FP exception flags
+// 中文：`frflags rd`：读取浮点异常标志。
+|fsflags rd, rs    | csrrw rd, fflags, rs       | Swap FP exception flags
+// 中文：`fsflags rd, rs`：交换浮点异常标志（写入新值并读取旧值）。
+|fsflags rs        | csrrw x0, fflags, rs       | Write FP exception flags
+// 中文：`fsflags rs`：写入浮点异常标志。
+|fsflagsi rd, imm  | csrrwi rd, fflags, imm     | Swap FP exception flags, immediate
+// 中文：`fsflagsi rd, imm`：用立即数交换浮点异常标志（写入新值并读取旧值）。
+|fsflagsi imm      | csrrwi x0, fflags, imm     | Write FP exception flags, immediate
+// 中文：`fsflagsi imm`：用立即数写入浮点异常标志。
+|===

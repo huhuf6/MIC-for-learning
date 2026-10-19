@@ -1,0 +1,95 @@
+= Introduction
+
+:sectnums!:
+
+This specification provides the processor-specific application binary interface
+document for RISC-V.
+
+This specification consists of the following three parts:
+
+- Calling convention
+- ELF specification
+- DWARF specification
+
+A future revision of this ABI will include a canonical set of mappings for
+memory model synchronization primitives.
+
+== Terms and Abbreviations
+
+This specification uses the following terms and abbreviations:
+
+[width=80%]
+|===
+| Term              | Meaning
+
+| ABI               | Application Binary Interface
+| gABI              | Generic System V Application Binary Interface
+| ELF               | Executable and Linking Format
+| psABI             | Processor-Specific ABI
+| DWARF             | Debugging With Arbitrary Record Formats
+| GOT               | Global Offset Table
+| PLT               | Procedure Linkage Table
+| PC                | Program Counter
+| TLS               | Thread-Local Storage
+| NTBS              | Null-Terminated Byte String
+| XLEN              | The width of an integer register in bits
+| FLEN              | The width of a floating-point register in bits
+| PTRSZ             | The width of a pointer type in bits (`8*sizeof(void *)`)
+| Linker relaxation | A mechanism for optimizing programs at link-time, see <<Linker Relaxation>> for more detail.
+| RVWMO             | RISC-V Weak Memory Order, as defined in the RISC-V specification.
+|===
+
+== Status of ABI
+
+[width=80%]
+|===
+| ABI Name          | Status
+
+| ILP32             | Ratified
+| ILP32F            | Ratified
+| ILP32D            | Ratified
+| ILP32E            | Draft
+| LP64              | Ratified
+| LP64F             | Ratified
+| LP64D             | Ratified
+| LP64Q             | Ratified
+| RV64ILP32         | Draft
+| RV64ILP32F        | Draft
+| RV64ILP32D        | Draft
+| RV64ILP32Q        | Draft
+|===
+
+=== Big-endian ABI Status
+
+[width=80%]
+|===
+| ABI Name          | Status
+
+| ILP32 (BE)        | Draft
+| ILP32F (BE)       | Draft
+| ILP32D (BE)       | Draft
+| ILP32E (BE)       | Draft
+| LP64 (BE)         | Draft
+| LP64F (BE)        | Draft
+| LP64D (BE)        | Draft
+| LP64Q (BE)        | Draft
+| RV64ILP32 (BE)    | Draft
+| RV64ILP32F (BE)   | Draft
+| RV64ILP32D (BE)   | Draft
+| RV64ILP32Q (BE)   | Draft
+|===
+
+NOTE: This specification now includes preliminary support for big-endian ABIs.
+Big-endian support has been implemented in GNU GCC and LLVM/Clang toolchains.
+The big-endian variants follow the same calling conventions as their
+little-endian counterparts, with only the data byte ordering differing.
+
+Any encodings that are marked as reserved for a specific extension (ISA or
+purely ABI addition) should be treated by standard tools identically to any
+other encodings reserved for future standard extensions. Such reservations are
+solely declarations of intent to reduce conflicts between in-flight standard
+extensions, and may be reclaimed for future reassignment at any point for any
+reason. Any encodings marked as reserved have draft, not ratified, status,
+regardless of whether they are reserved for a ratified ISA extension.
+
+:sectnums:

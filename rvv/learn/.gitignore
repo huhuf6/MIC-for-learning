@@ -1,0 +1,6 @@
+# Files to ignore in the repository
+#README.org
+README.org~
+README.md~
+.gitignore~
+#notes.txt

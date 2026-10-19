@@ -1,0 +1,21 @@
+# Allow-list for the link checker (regex, one per line).
+# These URLs are valid in a browser but fail automated checks, so we skip them
+# to avoid false-positive "broken link" reports. Keep this list small and
+# documented; only add links that are confirmed reachable manually.
+
+# raspberrypi.com returns HTTP 403 to non-browser clients (anti-bot).
+^https://www\.raspberrypi\.com/
+
+# star-history badge API is a dynamic image endpoint that intermittently 503s.
+^https://api\.star-history\.com/
+
+# mdpi.com (Cloudflare) returns HTTP 403 to non-browser clients (anti-bot).
+^https://www\.mdpi\.com/
+
+# doi.org/10.3390/* resolves to mdpi.com, which blocks non-browser clients
+# (Akamai "Access Denied"); the article opens normally in a browser.
+^https://doi\.org/10\.3390/
+
+# cw.fel.cvut.cz (CTU Prague course wiki) answers non-browser clients with a
+# "Bot Check" page and HTTP 402; people confirm once and reach the course.
+^https://cw\.fel\.cvut\.cz/
