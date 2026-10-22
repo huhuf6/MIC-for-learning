@@ -193,9 +193,21 @@ def : PatGprSimm12<add, ADDI>;
 
 `ALU_rr` 继续继承 `RVInstR`。沿继承链可看到输出 `GPR:$rd`、输入 `GPR:$rs1` 和 `GPR:$rs2`，以及 R 型指令的 `funct7`、`funct3`、opcode 字段。调度资源 `Sched<[WriteIALU, ReadIALU, ReadIALU]>` 描述调度模型，不负责定义 ISA 语义。
 
-### 第三步：自动 selector 与手写 Select 的边界
+### 第三步：匹配虚拟机与手写 Select 的边界
 
-`RISCVDAGToDAGISel::Select(SDNode *Node)` 位于 `RISCVISelDAGToDAG.cpp`。函数先处理已经是 machine opcode 的节点，再用 `switch` 处理常量、地址等特殊情况；其余节点最终交给 TableGen 生成的匹配器。
+`RISCVDAGToDAGISel::Select(SDNode *Node)` 位于 `RISCVISelDAGToDAG.cpp`。函数先处理已经是 machine opcode 的节点，再用 `switch` 处理常量、地址等特殊情况；其余节点进入 TableGen 生成的匹配程序。
+
+这里的实现模型是**虚拟机字节码**，不是有限状态机。`DAGISelMatcherEmitter.cpp` 把 pattern 编译成目标相关的 `static const uint8_t MatcherTable[]`，生成的 `SelectCode` 再调用 `SelectionDAGISel::SelectCodeCommon`。后者逐字节解释 `OPC_Scope`、`OPC_CheckOpcode`、`OPC_CheckType`、`OPC_EmitNode` 等内建操作码，并维护当前 DAG 节点、已记录操作数和失败回溯位置。
+
+```text
+TableGen pattern
+  -> DAGISel matcher 优化
+  -> MatcherTable 字节码（uint8_t 数组）
+  -> SelectCodeCommon 解释执行
+  -> 匹配成功后创建目标 MachineSDNode
+```
+
+这里的“字节码”不是 LLVM bitcode，也不是运行时从文件加载的程序；它是编译进目标后端的紧凑匹配表。表中可以包含按 opcode 或类型分派的 switch 操作，但整体执行机制仍是字节码解释器。
 
 因此普通寄存器 `add` 的关键证据是 `.td` 中的 `PatGprGpr<add, ADD>`，而不是手写 `switch` 中某个 `case ISD::ADD`。这是一条很实用的排查规则：
 
@@ -572,6 +584,7 @@ RUN 行与关键选项：
 | MachineInstr | LLVM 机器代码层的指令表示，可含虚拟寄存器和 pseudo |
 | MCInst | MC 层的轻量指令表示，用于文本输出或编码 |
 | TableGen | 从声明式记录生成指令信息、matcher、编码器等 C++ 表的工具 |
+| MatcherTable | TableGen 为 SelectionDAG 指令选择生成的目标相关匹配字节码 |
 | Pseudo instruction | 暂时表达复杂语义、稍后展开或 lower 的机器指令 |
 | Calling convention | 参数、返回值和寄存器保存等函数调用规则 |
 | Frame index | 栈对象的抽象编号，frame layout 后改写成实际地址 |
