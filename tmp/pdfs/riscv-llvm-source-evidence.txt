@@ -1,0 +1,33 @@
+LLVM source root: /root/MIC-for-learning/llvm-project
+Branch: main
+Commit: 043acd707
+
+Verified entry files
+OK llvm/test/CodeGen/RISCV/alu64.ll
+OK llvm/lib/Target/RISCV/RISCVTargetMachine.cpp
+OK llvm/lib/Target/RISCV/RISCVCodeGenPassBuilder.cpp
+OK llvm/lib/Target/RISCV/RISCVSubtarget.cpp
+OK llvm/lib/Target/RISCV/RISCVISelLowering.cpp
+OK llvm/lib/Target/RISCV/RISCVISelDAGToDAG.cpp
+OK llvm/lib/Target/RISCV/RISCVInstrInfo.td
+OK llvm/lib/Target/RISCV/RISCVCallingConv.td
+OK llvm/lib/Target/RISCV/RISCVFrameLowering.cpp
+OK llvm/lib/Target/RISCV/RISCVRegisterInfo.cpp
+OK llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp
+OK llvm/lib/Target/RISCV/MCTargetDesc/RISCVMCCodeEmitter.cpp
+OK llvm/lib/Target/RISCV/RISCVInstrInfoV.td
+OK llvm/lib/Target/RISCV/RISCVInstrInfoVPseudos.td
+OK llvm/lib/Target/RISCV/RISCVInsertVSETVLI.cpp
+
+Verified symbols at commit 043acd707
+llvm/lib/Target/RISCV/RISCVCodeGenPassBuilder.cpp:96: RISCVCodeGenPassBuilder::addInstSelector
+llvm/lib/Target/RISCV/RISCVFrameLowering.cpp:1012: RISCVFrameLowering::emitPrologue
+llvm/lib/Target/RISCV/RISCVFrameLowering.cpp:1327: RISCVFrameLowering::emitEpilogue
+llvm/lib/Target/RISCV/RISCVInsertVSETVLI.cpp:1127: RISCVInsertVSETVLI::runOnMachineFunction
+llvm/lib/Target/RISCV/RISCVRegisterInfo.cpp:586: RISCVRegisterInfo::eliminateFrameIndex
+llvm/lib/Target/RISCV/RISCVISelLowering.cpp:28297: RISCVTargetLowering::LowerFormalArguments
+llvm/lib/Target/RISCV/RISCVISelLowering.cpp:28609: RISCVTargetLowering::LowerCall
+llvm/lib/Target/RISCV/RISCVISelLowering.cpp:29135: RISCVTargetLowering::LowerReturn
+
+Line numbers are evidence for this commit only. The tutorial uses symbol names
+as the stable navigation method.
